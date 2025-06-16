@@ -1,0 +1,28 @@
+name: deepribopred
+channels:
+  - pytorch
+  - bioconda
+  - conda-forge
+dependencies:
+  - python=3.9.18
+  - pytorch=1.13.1=py3.9_cuda11.7_cudnn8.5.0_0
+  - pytorch-lightning
+  - cudatoolkit=11.7
+  - pandas
+  - numpy
+  - scipy
+  - pybigwig
+  - kipoiseq
+  - pyfaidx
+  - einops
+  - transformers
+  - torchmetrics
+  - matplotlib
+  - seaborn
+  - tqdm
+  - biopython
+  - h5py
+  - numexpr
+  - samtools
+  - deeptools
+  - pip
