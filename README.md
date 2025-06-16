@@ -1,5 +1,7 @@
 # RiboDeepPred
 
+[![GitHub license](https://img.shields.io/github/license/jorruior/RiboDeepPred)](https://github.com/jorruior/RiboDeepPred/blob/main/LICENSE.md)
+
 **RiboDeepPred** is a deep neural network designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
 
 RiboDeepPred integrates code adapted from [Translatomer](https://github.com/xiongxslab/translatomer) by xiongxslab, and is released under the MIT License.
@@ -81,14 +83,14 @@ bash 3_train_model.sh
 - The model will train using all samples defined in the metadata generated in step 2. You may modify this metadata to train on a specific subset of species or samples.
 - Training is computationally intensive. We recommend using multiple GPUs if available.
 
+---
+
+## 4. Prediction of Ribo-seq values
+
 ### Available Models
 
 - ``PosTransModelRiboPos`` (default): High accuracy, higher computational cost.
 - ``PosTransModel``: Less resource-intensive with competitive performance.
-
----
-
-## 4. Using the generated model to predict Ribo-seq values
 
 ---
 
