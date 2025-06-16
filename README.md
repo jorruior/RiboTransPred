@@ -10,9 +10,10 @@ RiboDeepPred integrates code adapted from [Translatomer](https://github.com/xion
 
 This repository provides scripts to:
 
-1. Parse genome and transcriptome data for a given species.
+1. Parse genome and transcriptome data for given species.
 2. Normalize and convert RNA-seq and Ribo-seq data from BAM format.
 3. Train a deep learning model on the processed data.
+4. Predict Ribo-seq data using sequence and RNA-seq as input.
 
 ---
 
@@ -77,6 +78,10 @@ bash 3_train_model.sh
 
 - ``PosTransModelRiboPos`` (default): High accuracy, higher computational cost.
 - ``PosTransModel``: Less resource-intensive with competitive performance.
+
+---
+
+## 4. Using the generated model to predict Ribo-seq values
 
 ---
 
