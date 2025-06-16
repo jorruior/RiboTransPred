@@ -1,6 +1,6 @@
 # RiboDeepPred
 
-[![GitHub license](https://img.shields.io/github/license/jorruior/RiboDeepPred)](https://github.com/jorruior/RiboDeepPred/blob/main/LICENSE.md)
+[![GitHub license](https://img.shields.io/github/license/jorruior/RiboDeepPred)](https://github.com/jorruior/RiboDeepPred/main/LICENSE.md)
 
 **RiboDeepPred** is a deep neural network designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
 
