@@ -34,6 +34,13 @@ conda env create -f environment.yml
 conda activate ribodeeppred
 ```
 
+FlashAttention-2 is not available via conda and must be installed separately.
+You can install it via pip (ensure you have a supported CUDA version, e.g., 11.8 or 12.1):
+
+```bash
+pip install flash-attn --no-build-isolation
+```
+
 ---
 
 ## 1. Parsing Genome and Transcriptome Data
