@@ -6,7 +6,7 @@ RiboDeepPred integrates code adapted from [Translatomer](https://github.com/xion
 
 ---
 
-## 🚀 Overview
+## Overview
 
 This repository provides scripts to:
 
@@ -16,7 +16,7 @@ This repository provides scripts to:
 
 ---
 
-## 📖 Citation
+## Citation
 
 If you use this repository or any part of the codebase in your work, please cite:
 
@@ -24,7 +24,7 @@ If you use this repository or any part of the codebase in your work, please cite
 
 ---
 
-## 📦 Prerequisites
+## Prerequisites
 
 To get started, clone this repository and create the Conda environment using the provided `environment.yml` file:
 
@@ -35,7 +35,7 @@ conda activate ribodeeppred
 
 ---
 
-## 🧬 1. Parsing Genome and Transcriptome Data
+## 1. Parsing Genome and Transcriptome Data
 
 Before training the model, genomic and transcriptomic data must be parsed and preprocessed. To do so, run:
 
@@ -47,7 +47,7 @@ bash 1_prepare_genomes.sh
 
 ---
 
-## 📊 2. Preparing RNA-seq and Ribo-seq Data
+## 2. Preparing RNA-seq and Ribo-seq Data
 
 To convert RNA-seq and Ribo-seq BAM files into a suitable format for model training, run:
 
@@ -59,7 +59,7 @@ bash 2_prepare_data.sh
 
 ---
 
-## 🧠 3. Training the Model
+## 3. Training the Model
 
 Once the data is prepared, you can train the model using:
 
@@ -80,12 +80,12 @@ bash 3_train_model.sh
 
 ---
 
-## 📁 uORFs
+## uORFs
 
 The `uORFs/` directory includes the list of upstream open reading frames used in the original study.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
