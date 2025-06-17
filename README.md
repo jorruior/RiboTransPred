@@ -53,7 +53,7 @@ Before training the model, genomic and transcriptomic data must be parsed and pr
 bash 1_prepare_genomes.sh
 ```
 
-📌 **Note:** Edit the `### CONFIGURATION BLOCK ###` and `### INPUT FILES ###` sections of the script to specify the species and input files relevant to your use case.
+📌 **Note:** Edit the `### CONFIGURATION BLOCK ###` and `### INPUT FILES ###` sections of the script to specify the species and input files relevant to your use case. Please note that the annotation files are not in the repository and need to be downloaded from the corresponding databases (e.g. Ensembl release 98 to reproduce the results of the manuscript).
 
 ---
 
