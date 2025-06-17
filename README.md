@@ -113,7 +113,7 @@ bash 4_predict_model.sh
     
 ---
 
-## uORFs
+## uORFs and CDSs used in the original study
 
 The `uORFs/` directory includes the list of upstream open reading frames used in the original study.
 
