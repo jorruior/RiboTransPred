@@ -5,7 +5,7 @@
 
 ### CONFIGURATION BLOCK ###
 
-# Base directories
+# Base directories: A directory named "GENOMES" with subfolders "annotation" (gtf)  and "fasta" (transcripts and genome fasta)
 GENOMES_DIR="/dir/GENOMES"
 ANNOTATION_DIR="${GENOMES_DIR}/annotation"
 FASTA_DIR="${GENOMES_DIR}/fasta"
@@ -22,9 +22,9 @@ CHIMP_GTF="${ANNOTATION_DIR}/Pan_troglodytes.Pan_tro_3.0.98.gtf"
 MACAQUE_GTF="${ANNOTATION_DIR}/Macaca_mulatta.Mmul_10.98.gtf"
 
 # Transcript files (FASTA format, header should include the same "transcript_id" from the GTF)
-HUMAN_TRANS="${ANNOTATION_DIR}/Homo_sapiens.GRCh38.cdna_and_ncrna.ENST.all.fa"
-CHIMP_TRANS="${ANNOTATION_DIR}/Pan_troglodytes.Pan_tro_3.0.cdna_and_ncrna.ENST.all.fa"
-MACAQUE_TRANS="${ANNOTATION_DIR}/Macaca_mulatta.Mmul_10.cdna_and_ncrna.ENST.all.fa"
+HUMAN_TRANS="${FASTA_DIR}/Homo_sapiens.GRCh38.cdna_and_ncrna.ENST.all.fa"
+CHIMP_TRANS="${FASTA_DIR}/Pan_troglodytes.Pan_tro_3.0.cdna_and_ncrna.ENST.all.fa"
+MACAQUE_TRANS="${FASTA_DIR}/Macaca_mulatta.Mmul_10.cdna_and_ncrna.ENST.all.fa"
 
 # Genome FASTA files (FASTA format)
 HUMAN_FASTA="${FASTA_DIR}/Homo_sapiens.GRCh38.dna.toplevel.fa"
