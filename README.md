@@ -115,7 +115,7 @@ bash 4_predict_model.sh
 
 ## uORFs and CDSs used in the original study
 
-The `uORFs/` directory includes the list of upstream open reading frames used in the original study.
+The `uorfs/` directory includes the list of upstream open reading frames and protein-coding sequences used in the original study.
 
 ---
 
