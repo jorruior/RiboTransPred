@@ -45,7 +45,7 @@ pip install flash-attn --no-build-isolation
 
 ---
 
-## 1. Parsing Genome and Transcriptome Data
+## :monkey: 1. Parsing Genome and Transcriptome Data
 
 Before training the model, genomic and transcriptomic data must be parsed and preprocessed. To do so, run:
 
