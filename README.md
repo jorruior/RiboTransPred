@@ -1,4 +1,4 @@
-# RiboDeepPred
+# RiboDeepPred (0.1)
 
 [![GitHub license](https://img.shields.io/github/license/jorruior/RiboDeepPred)](https://github.com/jorruior/RiboDeepPred/LICENSE.md)
 
