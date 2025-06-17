@@ -9,7 +9,7 @@ dependencies:
   - pytorch=1.13.1=py3.9_cuda11.7_cudnn8.5.0_0
   - pytorch-lightning
   - cudatoolkit=11.7
-  - cudnn=8.5.0
+  - cudnn
   - pandas
   - numpy
   - scipy
