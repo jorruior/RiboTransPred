@@ -6,7 +6,7 @@
 ### CONFIGURATION BLOCK ###
 
 # Base directories
-GENOMES_DIR="/fast/AG_Huebner/Jorge/GENOMES"
+GENOMES_DIR="/dir/GENOMES"
 ANNOTATION_DIR="${GENOMES_DIR}/annotation"
 FASTA_DIR="${GENOMES_DIR}/fasta"
 
@@ -17,9 +17,9 @@ mkdir -p "${OUTPUT_DIR}"
 ### INPUT FILES ###
 
 # Annotation files (Ensembl GTF format)
-HUMAN_GTF="${ANNOTATION_DIR}/Homo_sapiens.GRCh38.98.sorted.gtf"
-CHIMP_GTF="${ANNOTATION_DIR}/Pan_troglodytes.Pan_tro_3.0.98.sorted.gtf"
-MACAQUE_GTF="${ANNOTATION_DIR}/Macaca_mulatta.Mmul_10.98.sorted.gtf"
+HUMAN_GTF="${ANNOTATION_DIR}/Homo_sapiens.GRCh38.98.gtf"
+CHIMP_GTF="${ANNOTATION_DIR}/Pan_troglodytes.Pan_tro_3.0.98.gtf"
+MACAQUE_GTF="${ANNOTATION_DIR}/Macaca_mulatta.Mmul_10.98.gtf"
 
 # Transcript files (FASTA format, header should include the same "transcript_id" from the GTF)
 HUMAN_TRANS="${ANNOTATION_DIR}/Homo_sapiens.GRCh38.cdna_and_ncrna.ENST.all.fa"
@@ -31,7 +31,7 @@ HUMAN_FASTA="${FASTA_DIR}/Homo_sapiens.GRCh38.dna.toplevel.fa"
 CHIMP_FASTA="${FASTA_DIR}/Pan_troglodytes.Pan_tro_3.0.dna.toplevel.fa"
 MACAQUE_FASTA="${FASTA_DIR}/Macaca_mulatta.Mmul_10.dna.toplevel.fa"
 
-# FASTA index files (derived from genome FASTA, use samtools index)
+# FASTA index files (derived from genome FASTA, use samtools faidx to generate them)
 HUMAN_FAI="${HUMAN_FASTA}.fai"
 CHIMP_FAI="${CHIMP_FASTA}.fai"
 MACAQUE_FAI="${MACAQUE_FASTA}.fai"
