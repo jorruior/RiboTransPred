@@ -87,11 +87,30 @@ bash 3_train_model.sh
 
 ## 4. Prediction of Ribo-seq values
 
+Once the model has finished training, you can use RNA-seq and sequence data to predict Ribo-seq normalized log-values for a specific transcript or for all transcripts in the transcriptome. To run predictions, use:
+
+```bash
+bash 4_predict_model.sh
+```
+
+📌 **Notes:**
+
+- Be sure to edit the ### CONFIGURATION BLOCK ### in the script to match your dataset and target transcript(s).
+- For whole-transcriptome predictions, we recommend parallelizing the job using multiple processes to speed up computation.
+
 ### Available Models
 
 - ``PosTransModelRiboPos`` (default): High accuracy, higher computational cost.
 - ``PosTransModel``: Less resource-intensive with competitive performance.
 
+**Outputs:**
+
+- ``transcripts.out`` : Tabulated file with information about Ribo-seq prediction and correlation with observed values.
+- ``predictedribo.bedgraph``: BEDGraph file with the predicted normalized log-values of Ribo-seq for each bin.
+- ``attribution_scores.bedgraph``: BEDGraph file with the atribution scores of each nucleotide position in each bin.
+- ``inputribo.bedgraph``: BEDGraph file with the initial observed normalized log-values of Ribo-seq for each bin. Do not use if Ribo-seq data was not available for the RNA-seq sample used for prediction.
+- ``inputrna.bedgraph``: BEDGraph file with the predicted normalized log-values of Ribo-seq for each bin.
+    
 ---
 
 ## uORFs
