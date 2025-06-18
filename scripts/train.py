@@ -487,7 +487,9 @@ class TrainModule(LightningModule):
 			num_genomic_features, 
 			mid_hidden=512, 
 			target_length=args.region_len, 
-			nbins=args.nBins
+			nbins=args.nBins,
+			n_heads=args.n_heads,
+			dropout=args.dropout
 		)
 		return model
 		
@@ -575,6 +577,8 @@ if __name__ == '__main__':
 	# Dataloader Parameters
 	parser.add_argument('--batch-size', dest='dataloader_batch_size', default=8, type=int, help='Batch size')
 	parser.add_argument('--num-workers', dest='dataloader_num_workers', default=2, type=int, help='Dataloader workers')
+	parser.add_argument('--nheads', dest='n_heads', default=6, type=int, help='Number of attention heads')
+	parser.add_argument('--dropout', dest='dropout', default=0.3, type=float, help='Dropout rate')	
 	parser.add_argument('--checkpoint', type=str, default=None)
 
 	args = parser.parse_args()
