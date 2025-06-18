@@ -2,10 +2,6 @@
 # Author: Jorge Ruiz-Orera
 # This script prepares the main RNA-seq and Ribo-seq data for the model.
 
-# Activate the conda environment
-source ~/.bashrc
-mamba activate translatomer
-
 ### CONFIGURATION BLOCK ###
 INPUT_DIR="data/primate/"
 LENGTH="6000" #Transcript bp to be analyzed from 5'
