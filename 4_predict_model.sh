@@ -2,9 +2,6 @@
 # Author: Jorge Ruiz-Orera
 # This script predicts levels of translation of individual transcripts or full transcriptomes using the previously generated model. Two pre-built models are available: "PosTransModelRiboPos" (used in the manuscript) "PosTransModel" (lower computational demand)
 
-# Activate the conda environment
-source ~/.bashrc
-mamba activate translatomer
 
 ### CONFIGURATION BLOCK ###
 LENGTH="6000"
