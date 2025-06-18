@@ -26,7 +26,7 @@ class PositionalEncoding(nn.Module):
 
 
 class PosTransModel(nn.Module):
-	def __init__(self, num_genomic_features, mid_hidden, target_length, nbins, seqno=False):
+	def __init__(self, num_genomic_features, mid_hidden, target_length, nbins, n_heads=6, dropout=0.3, seqno=False):
 		super().__init__()
 		self.seqno = seqno
 		input_channels = num_genomic_features if self.seqno else 5 + num_genomic_features
@@ -51,9 +51,9 @@ class PosTransModel(nn.Module):
 		self.pos_enc = PositionalEncoding(d_model=384, max_len=target_length)
 		encoder_layer = nn.TransformerEncoderLayer(
 			d_model=384,
-			nhead=6,
+			nhead=n_heads,
 			dim_feedforward=1024,
-			dropout=0.3,
+			dropout=dropout,
 			batch_first=True,
 			activation='gelu'
 		)
@@ -121,7 +121,7 @@ class PosTransModel(nn.Module):
 
 
 class TransModel(nn.Module):
-	def __init__(self, num_genomic_features, mid_hidden, target_length=9000, nbins=180):
+	def __init__(self, num_genomic_features, mid_hidden, target_length=9000, nbins=180, n_heads=6, dropout=0.3):
 		super(TransModel, self).__init__()
 		print('Initializing TransModel')
 		# First convolution (aggressive downsampling)
@@ -184,7 +184,7 @@ class TransModel(nn.Module):
 
 
 class PosTransModelRiboPos(nn.Module):
-	def __init__(self, num_genomic_features, mid_hidden, target_length, nbins, seqno=False):
+	def __init__(self, num_genomic_features, mid_hidden, target_length, nbins, n_heads=6, dropout=0.3, seqno=False):
 		super().__init__()
 		self.seqno = seqno
 		input_channels = num_genomic_features if self.seqno else 5 + num_genomic_features
@@ -209,9 +209,9 @@ class PosTransModelRiboPos(nn.Module):
 		self.pos_enc = PositionalEncoding(d_model=384, max_len=target_length)
 		encoder_layer = nn.TransformerEncoderLayer(
 			d_model=384,
-			nhead=6,
+			nhead=n_heads,
 			dim_feedforward=1024,
-			dropout=0.3,
+			dropout=dropout,
 			batch_first=True,
 			activation='gelu'
 		)
@@ -275,7 +275,7 @@ class PosTransModelRiboPos(nn.Module):
 
 
 class PosTransModel2step(nn.Module):
-	def __init__(self, num_genomic_features, mid_hidden=384, target_length=1000, nbins=10, seqno=False):
+	def __init__(self, num_genomic_features, mid_hidden=384, target_length=1000, nbins=10, n_heads=6, dropout=0.3, seqno=False):
 		super().__init__()
 		self.seqno = seqno
 		input_channels = num_genomic_features if self.seqno else 5 + num_genomic_features
@@ -341,9 +341,9 @@ class PosTransModel2step(nn.Module):
 		# --- Transformer Layers ---
 		transformer_layer = nn.TransformerEncoderLayer(
 			d_model=mid_hidden,
-			nhead=8,  # 384/8 = 48 (divisible)
+			nhead=n_heads,  #(divisible)
 			dim_feedforward=1024,
-			dropout=0.3,
+			dropout=dropout,
 			batch_first=True,
 			activation='gelu'
 		)
