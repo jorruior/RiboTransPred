@@ -2,9 +2,6 @@
 #Author: Jorge Ruiz-Orera
 #This script prepares the main RNA-seq and Ribo-seq data for the model.
 
-# Activate the environment
-source ~/.bashrc
-mamba activate translatomer
 
 METADATA=$1
 REGION_LEN=$2
