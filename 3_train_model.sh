@@ -2,9 +2,6 @@
 # Author: Jorge Ruiz-Orera
 # This script trains the model for predicting Ribo-seq data. It is recommended to run in multiple gpus due to the high computing cost of PosTransModel.
 
-# Activate the conda environment
-source ~/.bashrc
-mamba activate translatomer
 
 ### CONFIGURATION BLOCK ###
 LENGTH="6000"
