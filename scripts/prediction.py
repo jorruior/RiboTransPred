@@ -17,6 +17,7 @@ from pytorch_lightning import LightningModule
 import torch.nn as nn
 from torchmetrics import Metric
 import math
+sys.path.append("../scripts")
 import model.models as models
 
 # Suppress warnings
