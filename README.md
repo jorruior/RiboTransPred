@@ -32,7 +32,7 @@ If you use this repository or any part of the codebase in your work, please cite
 RiboDeepPred works a series of bash scripts described in overview. Clone this repository and install the following prerequisites:
 
 - Python 3.9
-- Pytorch 2.2.0 (cuda 12.1)
+- Pytorch 2.2.0 (cuda 11.7)
 - FlashAttention-2
 - Other libraries (described in `environment.yml`)
 
@@ -44,7 +44,7 @@ conda activate ribotranspred
 ```
 
 FlashAttention-2 is not available via conda and must be installed separately.
-You can install it via pip (ensure you have a supported CUDA version, e.g., 11.8 or 12.1):
+You can install it via pip (ensure you have a supported CUDA version, e.g., 11.7 or 12.1):
 
 ```bash
 pip install flash-attn --no-build-isolation
