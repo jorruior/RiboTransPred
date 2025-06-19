@@ -6,9 +6,9 @@ channels:
   - bioconda
 dependencies:
   - python=3.9.18
-  - pytorch=1.13.1=py3.9_cuda11.7_cudnn8.5.0_0
+  - pytorch=2.1.2=py3.9_cuda12.1_cudnn8.9.2_0
   - pytorch-lightning
-  - cudatoolkit=11.7
+  - cudatoolkit=12.1
   - cudnn
   - pandas
   - numpy
@@ -18,7 +18,7 @@ dependencies:
   - pyfaidx
   - einops
   - transformers
-  - torchmetrics
+  - torchmetrics=0.17.0
   - matplotlib
   - seaborn
   - tqdm
