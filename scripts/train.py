@@ -31,6 +31,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks import DeviceStatsMonitor
 
 from typing import Optional
+sys.path.append("../scripts")
 import model.models as models
 
 import time
