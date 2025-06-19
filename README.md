@@ -27,9 +27,16 @@ If you use this repository or any part of the codebase in your work, please cite
 
 ---
 
-## Prerequisites
+## Installation
 
-To get started, clone this repository and create the Conda environment using the provided `environment.yml` file:
+RiboDeepPred works a series of bash scripts described in overview. Clone this repository and install the following prerequisites:
+
+- Python 3.9
+- Pytorch 2.2.0
+- FlashAttention-2
+- Other libraries (described in `environment.yml`)
+
+Alternatively, clone this repository and create the Conda environment using the provided `environment.yml` file:
 
 ```bash
 conda env create -f environment.yml
