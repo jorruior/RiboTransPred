@@ -1,10 +1,10 @@
-# RiboDeepPred (v0.1)
+# RiboTransPred (v0.1)
 
-[![GitHub license](https://img.shields.io/github/license/jorruior/RiboDeepPred)](https://github.com/jorruior/RiboDeepPred/LICENSE.md)
+[![GitHub license](https://img.shields.io/github/license/jorruior/RiboTransPred)](https://github.com/jorruior/RiboTransPred/LICENSE.md)
 
-**RiboDeepPred** is a deep neural network designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
+**RiboTransPred** is a deep neural network designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
 
-RiboDeepPred integrates code adapted from [Translatomer](https://github.com/xiongxslab/translatomer) by xiongxslab, and is released under the MIT License.
+RiboTransPred integrates code adapted from [Translatomer](https://github.com/xiongxslab/translatomer) by xiongxslab, and is released under the MIT License.
 
 ---
 
@@ -33,7 +33,7 @@ To get started, clone this repository and create the Conda environment using the
 
 ```bash
 conda env create -f environment.yml
-conda activate ribodeeppred
+conda activate ribotranspred
 ```
 
 FlashAttention-2 is not available via conda and must be installed separately.
