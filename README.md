@@ -32,7 +32,7 @@ If you use this repository or any part of the codebase in your work, please cite
 RiboDeepPred works a series of bash scripts described in overview. Clone this repository and install the following prerequisites:
 
 - Python 3.9
-- Pytorch 2.2.0
+- Pytorch 2.2.0 (cuda 12.1)
 - FlashAttention-2
 - Other libraries (described in `environment.yml`)
 
