@@ -730,7 +730,7 @@ if __name__ == '__main__':
 	pl.seed_everything(args.run_seed, workers=True)
 	
 	# Distribute chromosomes
-	with open(f'data/{args.dataset_assembly}_chrom_map.txt', 'r') as file:
+	with open(f'data/{args.dataset_assembly}/{args.dataset_assembly}_chrom_map.txt', 'r') as file:
 		chrlist = [line.strip('\n').split("\t")[1] for line in file]
 	train_chrlist, val_chrlist, test_chrlist = distribute_chromosomes_fixed(chrlist, args)
 	if trainer.global_rank == 0:
