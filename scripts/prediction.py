@@ -341,19 +341,19 @@ def process_interval(args):
 							pass
 
 			# Transform predictions
-			raw_scale_predictions = np.clip(raw_scale_predictions, -20, 20)  # Prevent overflow
+			raw_scale_predictions = np.clip(raw_scale_predictions, -12, 12)  # Prevent overflow
 			raw_scale_predictions = np.exp(raw_scale_predictions) - 0.0001
 			raw_scale_predictions = [x if x > 1 else 0 for x in raw_scale_predictions]
 			raw_scale_predictions_nt = np.exp(raw_scale_predictions_nt) - 0.0001
 			raw_scale_predictions_nt = [x if x > 1 else 0 for x in raw_scale_predictions_nt]
 			raw_scale_predictions_nt = raw_scale_predictions_nt[:int(len(all_coords))]
-			t[0] = np.clip(t[0], -20, 20)
+			t[0] = np.clip(t[0], -12, 12)
 			t[0] = np.exp(t[0]) - 0.0001
 			t[0] = [x if x > 1 else 0 for x in t[0]]
 
 
 			if ribo_bw_file != "none":
-				t2[0] = np.clip(t2[0], -20, 20)
+				t2[0] = np.clip(t2[0], -12, 12)
 				t2[0] = np.exp(t2[0]) - 0.0001
 				t2[0] = [x if x > 1 else 0 for x in t2[0]]
 
@@ -364,8 +364,8 @@ def process_interval(args):
 					for i, coord in enumerate(all_coords):
 						value = raw_scale_predictions_nt[n]
 						# Replace infinite or extremely large values
-						if not np.isfinite(value) or value > 1e6:
-							value = 1e6
+						if not np.isfinite(value) or value > np.exp(12):
+							value = np.exp(12)
 						if strand == "+":
 							out.write(f"{target_interval['chr'].replace('chr','').split('_')[0]}\t{coord}\t{coord+1}\t{value}\t{strand}\t{id}\n")
 						elif strand == "-":
