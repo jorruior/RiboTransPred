@@ -97,8 +97,9 @@ Before training the model, genomic and transcriptomic data must be parsed and pr
 ```bash
 bash 1_prepare_data.sh tracks.txt
 ```
-# tracks.txt - Input specification for track preparation
-# Format: <bam_file> <species> <tissue> <dataset>
+
+**tracks.txt** - Input specification for track preparation
+Format: <bam_file> <species> <tissue> <dataset>
 ---
 
 ## 2. Preparing RNA-seq and Ribo-seq Data
