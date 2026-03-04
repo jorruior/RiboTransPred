@@ -100,6 +100,7 @@ bash 1_prepare_data.sh tracks.txt
 
 **tracks.txt** - Input specification for track preparation
 Format: <bam_file> <species> <tissue> <dataset>
+
 ---
 
 ## 2. Preparing RNA-seq and Ribo-seq Data
