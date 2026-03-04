@@ -116,7 +116,7 @@ Each line must follow this format:
 - `<bam_file>` — Path to the BAM file
 - `<species>` — Species identifier (must match annotation filenames)
 - `<tissue>` — Tissue name
-- `<dataset>` — Dataset label used for downstream analysis
+- `<training/test>` — Label specifying if the sample is used for training or test
 
 ---
 
