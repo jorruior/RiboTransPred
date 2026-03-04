@@ -2,7 +2,7 @@
 """
 RiboTransPred — Tissue-conditioned Ribo-seq prediction (FiLM)
 =============================================================
-Predicts Ribo-seq profiles from RNA-seq + DNA sequence, conditioned on
+Trains Ribo-seq profiles from RNA-seq + DNA sequence, conditioned on
 tissue identity via FiLM (Feature-wise Linear Modulation).
 
 Author: Jorge Ruiz-Orera
