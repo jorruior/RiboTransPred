@@ -1,29 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=prepare_tracks
-#SBATCH --output=logs/prepare_tracks_%j.out
-#SBATCH --time=96:00:00
-#SBATCH --mem=300G
-#SBATCH --cpus-per-task=8
-#SBATCH --ntasks=1
-
 # Author: Jorge Ruiz-Orera
 # This script prepares RNA-seq and Ribo-seq tracks from BAM files specified in tracks.txt
 
 set -e  # Exit on error
 set -o pipefail  # Catch pipe errors
 
-source ~/.bashrc
-mamba activate translatomer
+conda activate translatomer
 
 # Configuration
 TRACKS_FILE=$1
 OUTPUT_ROOT="tracks"
 CPU="8"
 NORM="RPKM"
-
-# Save tmp files
-export TMPDIR="/fast/AG_Huebner/Jorge/tmp/$SLURM_JOB_ID"
-mkdir -p $TMPDIR
 
 # Create output directories
 mkdir -p "${OUTPUT_ROOT}"
@@ -198,9 +186,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     
 done < "$TRACKS_FILE"
 
-echo "========================================"
 echo "PROCESSING SUMMARY"
-echo "========================================"
 echo "Total entries: $total_count"
 echo "Successfully processed: $success_count"
 echo "Errors: $error_count"
@@ -228,7 +214,4 @@ if [[ $success_count -eq 0 ]]; then
 fi
 
 echo ""
-echo "========================================"
-echo "Processing complete! ✨"
 echo "All tracks saved in: ${OUTPUT_ROOT}/"
-echo "========================================"
