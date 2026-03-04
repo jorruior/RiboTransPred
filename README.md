@@ -32,8 +32,8 @@ If you use this repository or any part of the codebase in your work, please cite
 RiboDeepPred works a series of bash scripts described in overview. Clone this repository and install the following prerequisites:
 
 - Python 3.9
-- Pytorch 2.2.0 (cuda 12.1 or compatible)
-- Torchmetrics 0.11.1
+- Pytorch 2.5.1 (cuda 12.1 or compatible)
+- Torchvision 0.20.1
 - FlashAttention-2 (2.7.4)
 - Other libraries (described in `environment.yml`)
 
@@ -55,14 +55,11 @@ pip install flash-attn --no-build-isolation
 
 ## :monkey: 1. Parsing Genome and Transcriptome Data
 
-Before training the model, genomic and transcriptomic data must be parsed and preprocessed. To do so, run:
+Before training the model, genomic and transcriptomic data must be parsed and preprocessed, specifying the set of tracks to parse. To do so, run:
 
 ```bash
-bash 1_prepare_genomes.sh
+bash 1_prepare_data.sh tracks_test.txt
 ```
-
-📌 **Note:** Edit the `### CONFIGURATION BLOCK ###` and `### INPUT FILES ###` sections of the script to specify the species and input files relevant to your use case. Please note that the annotation files are not in the repository and need to be downloaded from the corresponding databases (e.g. Ensembl release 98 to reproduce the results of the manuscript).
-
 ---
 
 ## 2. Preparing RNA-seq and Ribo-seq Data
@@ -73,7 +70,7 @@ To convert RNA-seq and Ribo-seq BAM files into a suitable format for model train
 bash 2_prepare_data.sh
 ```
 
-📌 **Note:** Modify the configuration and input sections of the script accordingly. By default, the script uses test data stored in the `samples/` directory.
+📌 **Note:**  Please note that the annotation files are not in the repository and need to be downloaded from the corresponding databases into the folders "coordinates" and "genomes". For testing, these files are available for human, chimp, and macaque (Ensembl v.98).
 
 ---
 
