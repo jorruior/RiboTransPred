@@ -1,0 +1,22 @@
+name: ribotranspred
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pytorch=2.5.1
+  - torchvision=0.20.1
+  - torchaudio=2.5.1
+  - pytorch-lightning=2.5.3
+  - pandas
+  - numpy
+  - transformers
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - ca-certificates
+  - openssl
+  - pytorch-cuda=12.1
+  - certifi
+  - cuda-toolkit=12.1
+  - rich
+prefix: /fast/AG_Huebner/Jorge/miniforge3/envs/ribotranspred
