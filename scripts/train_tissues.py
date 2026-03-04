@@ -19,16 +19,9 @@ import time
 import warnings
 from typing import Dict, List, Optional, Tuple
 
-_RANK       = int(os.environ.get("SLURM_PROCID",  os.environ.get("RANK", 0)))
-_LOCAL_RANK = int(os.environ.get("SLURM_LOCALID", os.environ.get("LOCAL_RANK", 0)))
-_WORLD_SIZE = int(os.environ.get("SLURM_NTASKS",  os.environ.get("WORLD_SIZE", 1)))
-_NNODES     = int(os.environ.get("SLURM_NNODES",  1))
-
-
 def _dbg(msg):
 	sys.stderr.write(f"[rank {_RANK}] {msg}\n")
 	sys.stderr.flush()
-
 
 if _RANK != 0:
 	import builtins
@@ -36,13 +29,6 @@ if _RANK != 0:
 	builtins.print = lambda *a, **k: None
 	warnings.filterwarnings("ignore")
 	logging.disable(logging.CRITICAL)
-
-warnings.filterwarnings("ignore", message="Trying to infer the `batch_size`")
-
-_NCPU = int(os.environ.get("SLURM_CPUS_PER_TASK", 4))
-for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-		   "NUMEXPR_NUM_THREADS", "NUMEXPR_MAX_THREADS"):
-	os.environ[_v] = str(max(1, _NCPU))
 
 import numpy as np
 import pandas as pd
@@ -62,8 +48,7 @@ from transformers import get_cosine_schedule_with_warmup
 
 import model.models2 as models
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 2  File conversion
+# File conversion
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _pt_to_npy(pt_path):
@@ -135,8 +120,7 @@ def convert_all_tracks(training_tracks, args):
 		time.sleep(30)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 3  Coordinates + chromosome splitting
+# Coordinates + chromosome splitting
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _npy_paths(tracks_dir, species, tissue, region_len, nbins, psites):
@@ -266,8 +250,7 @@ def compute_shared_val_chromosomes(training_tracks, args, biotype):
 		except OSError: pass
 	return result
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 4  Dataset — returns tissue_id
+#  Dataset — returns tissue_id
 # ═══════════════════════════════════════════════════════════════════════════
 
 _OHE_TABLE = np.zeros((256, 5), dtype=np.float32)
@@ -339,12 +322,9 @@ class TissueTranscriptDataset(Dataset):
 		row = int(self.index_array[i])
 		seq = self.sequences[row]
 
-		# For mask computation, use the original sequence so that
-		# positions that are truly N in the genome remain masked.
 		mask = _make_mask_fast(seq, self.seq_len, self.pool_k)
 
 		if self.nosequence:
-			# Replace real bases with random A/C/T/G (Ns stay as N)
 			seq = _randomize_seq(seq, self.seq_len)
 
 		ohe = _encode_seq_fast(seq, self.seq_len)
@@ -361,8 +341,7 @@ class TissueTranscriptDataset(Dataset):
 		}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 5  DataModule — tissue-aware
+# DataModule — tissue-aware
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TissueRiboDataModule(LightningDataModule):
@@ -585,8 +564,7 @@ class TissueRiboDataModule(LightningDataModule):
 		return dataloaders if dataloaders else None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 6  Metrics and loss
+# Metrics and loss
 # ═══════════════════════════════════════════════════════════════════════════
 
 class StreamingPearsonR(Metric):
@@ -633,8 +611,8 @@ def _per_sample_pcc_loss(pred, target, mask):
 		return torch.tensor(0.0, device=pred.device)
 	return 1.0 - r[valid].mean()
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 7  LightningModule — tissue-conditioned
+
+# LightningModule — tissue-conditioned
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TissueRiboModel(LightningModule):
@@ -835,7 +813,6 @@ class TissueRiboModel(LightningModule):
 		self._vl_loss_n   = 0
 
 	def on_train_end(self):
-		# Set mean embedding in the +1 slot for generalised prediction
 		self.net.set_mean_embedding()
 
 		if self.global_rank == 0:
@@ -871,8 +848,7 @@ class TissueRiboModel(LightningModule):
 				"lr_scheduler": {"scheduler": sched, "interval": "step"}}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 8  CLI
+# CLI
 # ═══════════════════════════════════════════════════════════════════════════
 
 def parse_args():
@@ -912,8 +888,7 @@ def parse_args():
 	return p.parse_args()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 9  Track parser + tissue vocabulary
+# Track parser + tissue vocabulary
 # ═══════════════════════════════════════════════════════════════════════════
 
 def parse_tracks(path):
@@ -937,8 +912,7 @@ def build_tissue_vocab(tracks):
 	return {tissue: idx for idx, tissue in enumerate(tissues)}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 10  Main
+# Main
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
@@ -1090,9 +1064,6 @@ def main():
 		trainer.fit(model, dm, ckpt_path=ckpt)
 	else:
 		if _RANK == 0: print("=== Test Mode ===\n")
-		
-		# Let Lightning handle the distributed setup by using datamodule
-		# This avoids the DistributedSampler initialization issue
 		trainer.test(model, datamodule=dm, ckpt_path=ckpt)
 
 	if _RANK == 0:
