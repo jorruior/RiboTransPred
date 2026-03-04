@@ -1,5 +1,5 @@
 # tracks.txt - Input specification for track preparation
-# Format: <bam_file> <species> <tissue> <dataset>
+# Format: <bam_file> <species> <tissue> <training/test>
 
 # Human samples
 samples/human_cm_test/rna_pooled.bam human ipsc_cm training
