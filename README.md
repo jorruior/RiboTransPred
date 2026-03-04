@@ -1,7 +1,5 @@
 # RiboTransPred (v0.1)
 
-[![GitHub license](https://img.shields.io/github/license/jorruior/RiboTransPred)](https://github.com/jorruior/RiboTransPred/LICENSE.md)
-
 **RiboTransPred** is a causal Temporal Convolutional Network conditioned on tissue identity via Feature-wise Linear Modulation and designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
 
 RiboTransPred is released under the MIT License.
