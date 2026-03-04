@@ -12,7 +12,7 @@ REGION_LEN=6000
 RNACUTOFF=5
 
 # Loop over NBINS values
-for NBINS in 1000 3000 6000 500; do
+for NBINS in 1000 3000; do
     echo "Extracting features with NBINS=${NBINS}"
     python3 scripts/extract_cov_features.py $REGION_LEN $NBINS $RNACUTOFF
 done
