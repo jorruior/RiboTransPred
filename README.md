@@ -53,6 +53,43 @@ pip install flash-attn --no-build-isolation
 
 ---
 
+## Required Annotation Files
+
+RiboTransPreds requires genome and transcriptome annotations for each supported species.
+
+Directory structure:
+
+```
+genomes/
+  ├── [species].fa
+  ├── [species].transcripts.fa
+
+coordinates/
+  ├── [species].gtf
+```
+
+### File Descriptions
+
+- `genomes/[species].fa`  
+  Genome FASTA file for the species.  
+  Chromosome names **must match exactly** those used in the corresponding GTF file.
+
+- `genomes/[species].transcripts.fa`  
+  Transcriptome FASTA file for the species.  
+  Transcript identifiers (`transcript_id`) **must match exactly** those used in the GTF file.
+
+- `coordinates/[species].gtf`  
+  Gene annotation file in standard Ensembl/GENCODE GTF format.  
+  Chromosome and transcript identifiers must be consistent with the FASTA files.
+
+### Important Notes
+
+- All files must use consistent naming conventions.
+- Mismatched chromosome or transcript identifiers will cause downstream errors.
+- It is strongly recommended to use genome, transcriptome, and GTF files from the same Ensembl/GENCODE release.
+
+---
+
 ## :monkey: 1. Parsing Genome and Transcriptome Data
 
 Before training the model, genomic and transcriptomic data must be parsed and preprocessed, specifying the set of tracks to parse. To do so, run:
