@@ -125,10 +125,10 @@ Each line must follow this format:
 To convert RNA-seq and Ribo-seq BAM files into a suitable format for model training, run:
 
 ```bash
-bash 2_prepare_data.sh
+bash 2_extract_features.sh
 ```
 
-📌 **Note:**  Please note that the annotation files are not in the repository and need to be downloaded from the corresponding databases into the folders "coordinates" and "genomes". For testing, these files are available for human, chimp, and macaque (Ensembl v.98).
+📌 **Note:**  Please note that, as indicated above, the annotation files are not in the repository and need to be downloaded from the corresponding databases into the folders "coordinates" and "genomes".
 
 ---
 
