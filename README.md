@@ -4,7 +4,7 @@
 
 **RiboTransPred** is a deep neural network designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
 
-RiboTransPred integrates code adapted from [Translatomer](https://github.com/xiongxslab/translatomer) by xiongxslab, and is released under the MIT License.
+RiboTransPred is released under the MIT License.
 
 ---
 
