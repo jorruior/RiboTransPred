@@ -1,0 +1,10 @@
+# tracks.txt - Input specification for track preparation
+# Format: <bam_file> <species> <tissue> <dataset>
+
+# Human samples
+samples/human_cm_test/rna_pooled.bam human ipsc_cm training
+samples/human_lv_test/rna_pooled.bam human heart training
+samples/macaque_cm_test/rna_pooled.bam macaque ipsc_cm training
+samples/macaque_lv_test/rna_pooled.bam macaque heart training
+samples/chimp_cm_test/rna_pooled.bam chimp ipsc_cm test
+samples/chimp_lv_test/rna_pooled.bam chimp heart test
