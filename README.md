@@ -95,8 +95,10 @@ coordinates/
 Before training the model, genomic and transcriptomic data must be parsed and preprocessed, specifying the set of tracks to parse. To do so, run:
 
 ```bash
-bash 1_prepare_data.sh tracks_test.txt
+bash 1_prepare_data.sh tracks.txt
 ```
+# tracks.txt - Input specification for track preparation
+# Format: <bam_file> <species> <tissue> <dataset>
 ---
 
 ## 2. Preparing RNA-seq and Ribo-seq Data
