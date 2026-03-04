@@ -1,41 +1,13 @@
 #!/usr/bin/env python3
 """
-RiboTransPred — Tissue-conditioned Prediction & Attribution Script
-===================================================================
+RiboTransPred — Tissue-conditioned Ribo-seq prediction (FiLM)
+=============================================================
+Predicts Ribo-seq profiles from RNA-seq + DNA sequence, conditioned on
+tissue identity via FiLM (Feature-wise Linear Modulation).
 
-Adapted from predict.py for tissue-conditioned FiLM models trained with
-train_tissues.py. The model requires a tissue_id at inference time, which
-is resolved from --tissue using the tissue_vocab stored in the checkpoint.
-
-Usage:
-	python predict_tissues.py \
-		--checkpoint results_tissues/tissue_film_.../last.ckpt \
-		--species human \
-		--tissue heart
-
-	# For a tissue not seen during training (uses mean embedding):
-	python predict_tissues.py \
-		--checkpoint results_tissues/tissue_film_.../last.ckpt \
-		--species human \
-		--tissue prostate
-
-	# With ORF disruption analysis:
-	python predict_tissues.py \
-		--checkpoint results_tissues/tissue_film_.../last.ckpt \
-		--species human \
-		--tissue heart \
-		--orfs additional/all_orfs.txt
-
-Outputs:
-	{output_dir}/transcript_stats.tsv       (ALWAYS generated)
-	{output_dir}/predictions.bedgraph
-	{output_dir}/rnaseq.bedgraph
-	{output_dir}/riboseq.bedgraph
-	{output_dir}/attributions.bedgraph
-	{output_dir}/mutations.tsv              (when --mutate or --orfs)
-	{output_dir}/mutations/predictions.bedgraph  (when --mutate)
-	{output_dir}/mutations/sequences.fasta       (when --mutate)
+Author: Jorge Ruiz-Orera
 """
+
 
 import argparse
 import gc
@@ -1090,4 +1062,5 @@ def main():
 
 
 if __name__ == "__main__":
+
 	main()
