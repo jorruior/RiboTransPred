@@ -87,14 +87,17 @@ def extract_fasta_sequences(fasta_file, seq_len, intervals, strand, chromosome_l
 
 def get_species_tissue_from_path(bw_path):
 	"""Extract species and tissue from .bw file path."""
+	# Remove tracks/ prefix and .bw suffix
 	rel_path = bw_path.replace(f"{TRACKS_DIR}/", "").replace(".bw", "")
 	parts = rel_path.split("/")
 	
 	if len(parts) >= 2:
 		species = parts[0]
 		tissue = parts[1]
+		# Remove species_tissue_ prefix from tissue if present
 		if tissue.startswith(f"{species}_"):
 			tissue = tissue.replace(f"{species}_", "", 1)
+		# Remove _rna or _ribo suffix
 		for suffix in ["_rna", "_ribo", ".psites"]:
 			if tissue.endswith(suffix):
 				tissue = tissue[:-len(suffix)]
@@ -110,7 +113,13 @@ def extract_chromosome_lengths(fasta_file):
 	return chromosome_lengths
 
 def parse_cds_positions(gtf_file):
-	"""Parse CDS positions from GTF file."""
+	"""
+	Parse CDS positions from GTF file.
+	Returns three dicts:
+	- transcript_cds: {transcript_id: [(start, end), ...]}
+	- transcript_start_codons: {transcript_id: [(start, end), ...]}
+	- transcript_stop_codons: {transcript_id: [(start, end), ...]}
+	"""
 	print(f"  Parsing CDS, start_codon, and stop_codon positions from GTF file: {gtf_file}")
 	
 	transcript_cds = defaultdict(list)
@@ -169,7 +178,11 @@ def parse_cds_positions(gtf_file):
 	return transcript_cds, transcript_start_codons, transcript_stop_codons
 
 def parse_gtf_to_bed(gtf_file, output_bed_file):
-	"""Parse Ensembl GTF file to create a BED file with exon regions."""
+	"""
+	Parse Ensembl GTF file to create a BED file with exon regions.
+	GTF format: seqname source feature start end score strand frame attributes
+	We'll extract exons for protein-coding transcripts.
+	"""
 	print(f"  Parsing GTF file: {gtf_file}")
 	
 	# Store exons by transcript
@@ -245,6 +258,7 @@ def create_cds_vector(transcript_id, all_coords, cds_dict, start_codon_dict, sto
 	Create CDS vector for a transcript.
 	0 = no CDS, 2 = CDS (including stop codon)
 	Only mark CDS if transcript has BOTH start_codon and stop_codon annotations.
+	Vector is trimmed to maximum 6000 nucleotides.
 	"""
 	# Check if transcript has both start and stop codon annotations
 	has_start_codon = transcript_id in start_codon_dict and len(start_codon_dict[transcript_id]) > 0
@@ -326,7 +340,7 @@ def generate_coordinates(species, bw_paths):
 	transcripts_file = os.path.join(GENOME_DIR, f"{species}.transcripts.fa")
 	
 	# Check if required files exist
-	for f in [gtf_file, fasta_file]:
+	for f in [gtf_file, fasta_file, transcripts_file]:
 		if not os.path.exists(f):
 			print(f"  ERROR: Required file not found: {f}")
 			return None
@@ -351,12 +365,7 @@ def generate_coordinates(species, bw_paths):
 	# Read regions from BED file
 	regions = pd.read_csv(bed_file, sep='\t', names=['chr', 'start', 'end', 'strand', 'id', 'transcript_biotype'], dtype={'chr': str})
 	
-	# Read transcripts if available
-	if os.path.exists(transcripts_file):
-		sequences_dict = read_fasta(transcripts_file)
-	else:
-		sequences_dict = {}
-		print(f"  Warning: transcripts.fa not found for {species}, extracting from genome")
+	sequences_dict = read_fasta(transcripts_file)
 	
 	# Group regions by transcript ID
 	grouped_regions = regions.groupby('id', sort=False)
@@ -806,4 +815,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-
