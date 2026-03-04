@@ -92,14 +92,31 @@ coordinates/
 
 ## :monkey: 1. Parsing Genome and Transcriptome Data
 
-Before training the model, genomic and transcriptomic data must be parsed and preprocessed, specifying the set of tracks to parse. To do so, run:
+Before training the model, genomic and transcriptomic data must be parsed and preprocessed.  
+You must specify the set of tracks to process using a configuration file.
+
+Run:
 
 ```bash
 bash 1_prepare_data.sh tracks.txt
 ```
 
-**tracks.txt** - Input specification for track preparation
-Format: <bam_file> <species> <tissue> <dataset>
+### Input File
+
+**`tracks.txt`** — Track specification file used for data preparation.
+
+Each line must follow this format:
+
+```
+<bam_file> <species> <tissue> <dataset>
+```
+
+#### Field Description
+
+- `<bam_file>` — Path to the BAM file
+- `<species>` — Species identifier (must match annotation filenames)
+- `<tissue>` — Tissue name
+- `<dataset>` — Dataset label used for downstream analysis
 
 ---
 
