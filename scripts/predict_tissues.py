@@ -26,8 +26,7 @@ import torch.nn.functional as F
 import model.models2 as models
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 1  Utilities
+# § Utilities
 # ═══════════════════════════════════════════════════════════════════════════
 
 _OHE_TABLE = np.zeros((256, 5), dtype=np.float32)
@@ -296,8 +295,6 @@ def _find_codon_start(seq, position, codon_str):
 	return -1
 
 
-# ── Codon table & translation ─────────────────────────────────────────
-
 CODON_TABLE = {
 	'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
 	'CTT': 'L', 'CTC': 'L', 'CTA': 'L', 'CTG': 'L',
@@ -344,8 +341,7 @@ def translate_orf(seq, start_pos_0, orf_nt_len):
 	return ''.join(aas)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 1b  ORF disruption helpers
+# ORF disruption helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def find_orf_in_transcript(transcript_seq, orf_seq):
@@ -392,8 +388,7 @@ def disrupt_orf_stop(transcript_seq, orf_start_0, orf_len):
 	return ''.join(seq_list)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 2  Transcript → Genomic coordinate mapping
+# Transcript → Genomic coordinate mapping
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_transcript_to_genome_map(bed_df, transcript_id):
@@ -431,8 +426,7 @@ def map_bin_to_genomic_intervals(bin_start_tx, bin_end_tx, genome_map, strand):
 	return intervals
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 3  Integrated Gradients (tissue-aware)
+# Integrated Gradients (tissue-aware)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def integrated_gradients(model, features_tensor, tissue_id_tensor,
@@ -459,8 +453,7 @@ def integrated_gradients(model, features_tensor, tissue_id_tensor,
 	return ig.sum(dim=1).cpu().numpy()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 4  Mutation helpers
+# Mutation helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def apply_mutation(seq, position, alt_allele, strand="+"):
@@ -489,8 +482,7 @@ def predict_single_transcript(net, seq, rna_data, region_len, tissue_id_tensor,
 	return pred_log if output_raw_log else inverse_log_transform(pred_log)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# § 5  Main
+#  Main
 # ═══════════════════════════════════════════════════════════════════════════
 
 def parse_args():
@@ -624,7 +616,6 @@ def main():
 	# ── Set up output files ───────────────────────────────────────────
 	os.makedirs(args.output_dir, exist_ok=True)
 
-	# transcript_stats.tsv is ALWAYS generated
 	stats_path = os.path.join(args.output_dir, "transcript_stats.tsv")
 	stats_file = open(stats_path, "wt")
 	stats_file.write(
@@ -827,7 +818,7 @@ def main():
 					gpos = genome_map[bp]
 					attr_file.write(f"{chrom}\t{gpos}\t{gpos + 1}\t{attributions[bp]:.6f}\t{strand}\t{transcript_id}\n")
 
-		# ── Region statistics (always computed) ───────────────────
+		# ── Region statistics ───────────────────
 		cds_mask = np.array([c == '2' for c in region_annot[:args.region_len]])
 		has_cds = np.any(cds_mask)
 		region_type = "CDS" if has_cds else "transcript"
@@ -866,7 +857,7 @@ def main():
 			corr_pred_obs_fiveutr_nonlog = corr_pred_obs_fiveutr_log = float('nan')
 			corr_rna_ribo_fiveutr_nonlog = corr_rna_ribo_fiveutr_log = float('nan')
 
-		# ── Always write transcript_stats.tsv ─────────────────────
+		# ── Transcript_stats.tsv ─────────────────────
 		stats_file.write(
 			f"{transcript_id}\t{region_type}\t{region_length}\t"
 			f"{rna_region_mean:.6f}\t{ribo_region_mean:.6f}\t{wt_region_mean:.6f}\t"
@@ -1064,3 +1055,4 @@ def main():
 if __name__ == "__main__":
 
 	main()
+
