@@ -135,13 +135,12 @@ bash 2_extract_features.sh
 Once the data is prepared, you can train the model using:
 
 ```bash
-bash 3_train_model.sh
+bash 3_train_model_tissue.sh tracks.txt
 ```
 
 📌 **Notes:**
 
-- Edit the `### CONFIGURATION BLOCK ###` to tailor the training to your dataset.
-- The model will train using all samples defined in the metadata generated in step 2. You may modify this metadata to train on a specific subset of species or samples.
+- Hyperparameters are included in the bash script.
 - Training is computationally intensive. We recommend using multiple GPUs if available.
 
 ---
