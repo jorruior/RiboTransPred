@@ -1,19 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=extract_features
-#SBATCH --output=logs/extract_features_%j.out
-#SBATCH --time=96:00:00
-#SBATCH --mem=600G
-#SBATCH --cpus-per-task=1
-#SBATCH --ntasks=1
-
 # Author: Jorge Ruiz-Orera
 # This script extract RNA-seq and Ribo-seq coverage from features, and also extracts transcript sequences adapted for training
 
 set -e  # Exit on error
 set -o pipefail  # Catch pipe errors
 
-source ~/.bashrc
-mamba activate translatomer
+conda activate translatomer
 
 # Configuration
 REGION_LEN=6000
