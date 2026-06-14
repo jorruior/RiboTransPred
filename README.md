@@ -19,9 +19,7 @@ This repository provides scripts to:
 
 ## Citation
 
-If you use this repository or any part of the codebase in your work, please cite:
-
-> X> *(Replace this with the appropriate citation once the publication is available.)*
+If you use this repository or any part of the codebase in your work, please cite: Ruiz-Orera, Miller, Greiner et al. Nature Cardiovascular Research 2024
 
 ---
 
