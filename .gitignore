@@ -9,9 +9,6 @@
 !/1_prepare_data.sh
 !/2_extract_features.sh
 !/3_train_model_tissue.sh
-!/3_train_model_tissue_noseq.sh
-!/3_train_model_tissue_shuffledutr.sh
-!/3_train_model_tissue_homologs.sh
 !/3_train_model_tissue_homologs_onenode.sh
 !/4_predict_tissue.sh
 !/scripts/
@@ -56,3 +53,8 @@ __pycache__/
 *.err
 .env
 .env.*
+
+# Local training experiment launchers.
+/3_train_model_tissue_homologs.sh
+/3_train_model_tissue_noseq.sh
+/3_train_model_tissue_shuffledutr.sh

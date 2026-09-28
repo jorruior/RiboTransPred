@@ -159,11 +159,13 @@ All members of a cluster stay in the same partition across species, tissues and 
 This mode creates no test partition, ignores test-tagged tracks, and cannot be combined with `--test` or the chromosome-debugging option `--trial`. Cluster assignments are saved in `homology_split.json`.
 
 ```bash
-sbatch 3_train_model_tissue_homologs.sh \
-  tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4 /path/to/clusters.tsv
+CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
+  --tracks tracks.txt --model-type PosTransModelTCNFiLMRef \
+  --region_len 4500 --nBins 1500 --seed 4 \
+  --homology /path/to/clusters.tsv
 ```
 
-The homology launcher runs training and validation only. The mapping is supplied as its sixth argument. Provide your own mapping file; homology inputs are excluded from Git.
+This command runs training and validation only. Provide your own mapping file; homology inputs are excluded from Git. Add the desired training hyperparameters as in the one-GPU example above.
 
 ### Sequence controls
 
@@ -173,11 +175,16 @@ Add `--shuflledutr` (alias `--shuffledutr`) to shuffle sequence before the annot
 
 Each species/transcript receives a fixed shuffle across workers, epochs and samples. `--shuffle-seed` selects a separate seed; otherwise `--seed` is used. The two controls cannot be combined. Use identical splits and hyperparameters for comparisons. Shuffling tests UTR sequence order while retaining composition; it does not remove the UTR.
 
-SLURM control launchers accept the same five positional arguments as the main launcher:
+Run controls directly, adding the same hyperparameters used for your baseline:
 
 ```bash
-sbatch 3_train_model_tissue_noseq.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
-sbatch 3_train_model_tissue_shuffledutr.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
+CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
+  --tracks tracks.txt --model-type PosTransModelTCNFiLMRef \
+  --region_len 4500 --nBins 1500 --seed 4 --nosequence
+
+CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
+  --tracks tracks.txt --model-type PosTransModelTCNFiLMRef \
+  --region_len 4500 --nBins 1500 --seed 4 --shuflledutr
 ```
 
 ### Training outputs and resumption
