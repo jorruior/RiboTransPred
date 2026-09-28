@@ -167,24 +167,14 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
 
 This command runs training and validation only. Provide your own mapping file; homology inputs are excluded from Git. Add the desired training hyperparameters as in the one-GPU example above.
 
-### Sequence controls
+### RNA-only control
 
-Add `--nosequence` to train with RNA coverage and tissue/condition context, without nucleotide features.
-
-Add `--shuflledutr` (alias `--shuffledutr`) to shuffle sequence before the annotated CDS. This preserves nucleotide composition, keeps Ns in place, and leaves CDS, 3-prime UTR, RNA coverage and targets unchanged. Only bases within the input window are shuffled. The ninth coordinate-table column defines the CDS in spliced-transcript orientation on both strands. Transcripts without marked CDS bases remain unchanged.
-
-Each species/transcript receives a fixed shuffle across workers, epochs and samples. `--shuffle-seed` selects a separate seed; otherwise `--seed` is used. The two controls cannot be combined. Use identical splits and hyperparameters for comparisons. Shuffling tests UTR sequence order while retaining composition; it does not remove the UTR.
-
-Run controls directly, adding the same hyperparameters used for your baseline:
+Add `--nosequence` to train with RNA coverage and tissue/condition context, without nucleotide features. Use the same split and hyperparameters as your baseline:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
   --tracks tracks.txt --model-type PosTransModelTCNFiLMRef \
   --region_len 4500 --nBins 1500 --seed 4 --nosequence
-
-CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
-  --tracks tracks.txt --model-type PosTransModelTCNFiLMRef \
-  --region_len 4500 --nBins 1500 --seed 4 --shuflledutr
 ```
 
 ### Training outputs and resumption
