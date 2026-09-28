@@ -1,13 +1,48 @@
 #!/usr/bin/env python3
 """
-RiboTransPred — Tissue-conditioned Ribo-seq prediction (FiLM)
-=============================================================
-Predicts Ribo-seq profiles from RNA-seq + DNA sequence, conditioned on
-tissue identity via FiLM (Feature-wise Linear Modulation).
+RiboTransPred — Tissue-conditioned Prediction & Attribution Script
+===================================================================
 
-Author: Jorge Ruiz-Orera
+Prediction for tissue-conditioned FiLM models trained with
+train_tissues.py. The model requires a tissue_id at inference time, which
+is resolved from --tissue using the tissue_vocab stored in the checkpoint.
+
+Usage:
+	python predict_tissues.py \
+		--checkpoint results_tissues/tissue_film_.../best.ckpt \
+		--species human \
+		--tissue heart
+
+	# For a tissue not seen during training (uses mean embedding):
+	python predict_tissues.py \
+		--checkpoint results_tissues/tissue_film_.../best.ckpt \
+		--species human \
+		--tissue prostate
+
+	# With ORF disruption analysis:
+	python predict_tissues.py \
+		--checkpoint results_tissues/tissue_film_.../best.ckpt \
+		--species human \
+		--tissue heart \
+		--orfs additional/all_orfs.txt
+
+Outputs:
+	{output_dir}/transcript_stats.tsv       (ALWAYS generated)
+	{output_dir}/predictions.bedgraph
+	{output_dir}/rnaseq.bedgraph
+	{output_dir}/riboseq.bedgraph
+	{output_dir}/attributions.bedgraph      (target = sum over CDS bins)
+	{output_dir}/attributions_total.bedgraph (target = sum over all bins)
+	{output_dir}/mutations.tsv              (when --mutate or --orfs)
+	{output_dir}/mutations/predictions.bedgraph  (when --mutate)
+	{output_dir}/mutations/sequences.fasta       (when --mutate)
+	{output_dir}/mutations/sequences_full.fasta  (when --mutate, full transcript seqs)
+
+Resuming:
+	If transcript_stats.tsv / mutations.tsv already exist in --output_dir
+	(e.g. from a previous run), transcripts/variants already written there
+	are skipped and only new ones are appended -- nothing is recalculated.
 """
-
 
 import argparse
 import gc
@@ -20,13 +55,16 @@ from scipy import stats
 
 import numpy as np
 import pandas as pd
+from sequence_controls import shuffle_five_prime_utr
 import torch
 import torch.nn.functional as F
+from attribution_v2 import integrated_gradients_signal
 
 import model.models2 as models
 
 
-# § Utilities
+# ═══════════════════════════════════════════════════════════════════════════
+# § 1  Utilities
 # ═══════════════════════════════════════════════════════════════════════════
 
 _OHE_TABLE = np.zeros((256, 5), dtype=np.float32)
@@ -61,8 +99,8 @@ def inverse_log_transform(log_values):
 	return transformed
 
 
-def load_coords(species):
-	path = f"coordinates/{species}_coordinates.txt"
+def load_coords(species,coordinates):
+	path = f"{coordinates}/{species}_coordinates_v2.txt"
 	if not os.path.exists(path):
 		print(f"ERROR: coordinate file not found: {path}")
 		return None
@@ -143,12 +181,56 @@ def load_orfs(orfs_file):
 	return orfs, n_total
 
 
-def _npy_paths(tracks_dir, species, tissue, region_len, nbins, psites):
-	bn = f"{species}_{tissue}"
-	d = f"{tracks_dir}/{species}/{tissue}"
-	inp_rna = f"{d}/{bn}_rna_{region_len}_log_rnaseq_final.npy"
+# ── Resume / checkpoint helpers ───────────────────────────────────────────
+
+def load_existing_transcript_ids(stats_path):
+	"""
+	Scan a previously written transcript_stats.tsv (if any) and return the
+	set of transcript_id values already present, so those transcripts can be
+	skipped on a resumed run instead of being recalculated.
+	"""
+	ids = set()
+	if not os.path.exists(stats_path):
+		return ids
+	with open(stats_path) as f:
+		next(f, None)  # header
+		for line in f:
+			line = line.rstrip("\n")
+			if not line:
+				continue
+			ids.add(line.split("\t", 1)[0])
+	return ids
+
+
+def load_existing_variant_ids(mut_path):
+	"""
+	Scan a previously written mutations.tsv (if any) and return the set of
+	variant_id values already present, so those variants can be skipped on
+	a resumed run instead of being recalculated.
+	"""
+	ids = set()
+	if not os.path.exists(mut_path):
+		return ids
+	with open(mut_path) as f:
+		next(f, None)  # header
+		for line in f:
+			line = line.rstrip("\n")
+			if not line:
+				continue
+			ids.add(line.split("\t", 1)[0])
+	return ids
+
+
+def make_variant_id(transcript_id, position, alt_allele_fwd, effect, classification):
+	return f"{transcript_id}__{position}__{alt_allele_fwd}__{effect}__{classification}"
+
+
+def _npy_paths(tracks_dir, species, tissue_condition, region_len, nbins, psites):
+	bn = f"{species}_{tissue_condition}"
+	d = f"{tracks_dir}/{species}/{tissue_condition}"
+	inp_rna = f"{d}/{bn}_rna_{region_len}_log_rnaseq_final_v2.npy"
 	tag = "ribo.psites" if psites else "ribo"
-	inp_ribo = f"{d}/{bn}_{tag}_{region_len}_{nbins}_log_riboseq_final.npy"
+	inp_ribo = f"{d}/{bn}_{tag}_{region_len}_{nbins}_log_riboseq_final_v2.npy"
 	return inp_rna, inp_ribo
 
 
@@ -224,19 +306,25 @@ def get_fiveutr_mask(region_annot, region_len):
 
 def get_seq_context(seq, position, alt_allele):
 	"""
-	Get 5-nt context around a mutation: 2 upstream + alt + 2 downstream.
+	Get sequence context around a mutation:
+	  2 upstream nt + full alt allele + 2 downstream nt.
+	For multi-nt alleles the alt covers positions [pos_0, pos_0 + n_alt).
+	Downstream context starts immediately after the last replaced position.
 	Uses N for positions beyond transcript boundaries.
 	"""
 	pos_0 = position - 1
+	n_alt = len(alt_allele)
 	context = []
-	for offset in [-2, -1, 0, 1, 2]:
+	# 2 upstream bases
+	for offset in [-2, -1]:
 		p = pos_0 + offset
-		if p < 0 or p >= len(seq):
-			context.append('N')
-		elif offset == 0:
-			context.append(alt_allele.upper())
-		else:
-			context.append(seq[p].upper())
+		context.append(seq[p].upper() if 0 <= p < len(seq) else 'N')
+	# full alt allele (already in forward orientation at this point)
+	context.append(alt_allele.upper())
+	# 2 downstream bases (relative to the last replaced position)
+	for offset in range(n_alt, n_alt + 2):
+		p = pos_0 + offset
+		context.append(seq[p].upper() if 0 <= p < len(seq) else 'N')
 	return ''.join(context)
 
 
@@ -295,6 +383,8 @@ def _find_codon_start(seq, position, codon_str):
 	return -1
 
 
+# ── Codon table & translation ─────────────────────────────────────────
+
 CODON_TABLE = {
 	'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
 	'CTT': 'L', 'CTC': 'L', 'CTA': 'L', 'CTG': 'L',
@@ -341,7 +431,23 @@ def translate_orf(seq, start_pos_0, orf_nt_len):
 	return ''.join(aas)
 
 
-# ORF disruption helpers
+def get_orf_nt_sequence(seq, start_pos_0, orf_nt_len):
+	"""
+	Return the nucleotide sequence of an ORF starting at start_pos_0.
+	If orf_nt_len == -1 (no stop codon found), returns from the start codon
+	to the end of the sequence. Otherwise returns the full ORF nucleotide
+	sequence including the stop codon (orf_nt_len nucleotides total), mirroring
+	the region translate_orf() operates over.
+	"""
+	if orf_nt_len == -1:
+		end = len(seq)
+	else:
+		end = start_pos_0 + orf_nt_len
+	return seq[start_pos_0:end].upper()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# § 1b  ORF disruption helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def find_orf_in_transcript(transcript_seq, orf_seq):
@@ -388,7 +494,8 @@ def disrupt_orf_stop(transcript_seq, orf_start_0, orf_len):
 	return ''.join(seq_list)
 
 
-# Transcript → Genomic coordinate mapping
+# ═══════════════════════════════════════════════════════════════════════════
+# § 2  Transcript → Genomic coordinate mapping
 # ═══════════════════════════════════════════════════════════════════════════
 
 def build_transcript_to_genome_map(bed_df, transcript_id):
@@ -426,34 +533,19 @@ def map_bin_to_genomic_intervals(bin_start_tx, bin_end_tx, genome_map, strand):
 	return intervals
 
 
-# Integrated Gradients (tissue-aware)
+# ═══════════════════════════════════════════════════════════════════════════
+# § 3  Integrated Gradients (tissue-aware)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def integrated_gradients(model, features_tensor, tissue_id_tensor,
-						 cds_mask_bins, device, n_steps=20):
-	features = features_tensor.clone().to(device)
-	tissue_ids = tissue_id_tensor.to(device)
-	baseline = features.clone()
-	baseline[:, :, :5] = 0.0
-	cds_mask_bins_t = torch.tensor(cds_mask_bins, dtype=torch.float32, device=device)
-	grads_accumulated = torch.zeros_like(features[:, :, :5])
-	for step in range(n_steps + 1):
-		alpha = step / n_steps
-		interp = baseline.clone()
-		interp[:, :, :5] = baseline[:, :, :5] + alpha * (features[:, :, :5] - baseline[:, :, :5])
-		interp.requires_grad_(True)
-		pred = model(interp, tissue_ids)
-		target = (pred * cds_mask_bins_t.unsqueeze(0)).sum()
-		target.backward()
-		grads_accumulated += interp.grad[:, :, :5].detach()
-		interp.requires_grad_(False)
-	avg_grads = grads_accumulated / (n_steps + 1)
-	diff = (features[:, :, :5] - baseline[:, :, :5]).detach()
-	ig = (avg_grads * diff).squeeze(0)
-	return ig.sum(dim=1).cpu().numpy()
+def integrated_gradients(model, features_tensor, tissue_id_tensor, cond_id_tensor,
+						 target_mask_bins, device, n_steps=20):
+	return integrated_gradients_signal(model, features_tensor.to(device), target_mask_bins,
+		model_args=(tissue_id_tensor.to(device), cond_id_tensor.to(device)),
+		n_steps=n_steps, eps=EPS, zero_threshold=ZERO_THRESHOLD)
 
 
-# Mutation helpers
+# ═══════════════════════════════════════════════════════════════════════════
+# § 4  Mutation helpers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def apply_mutation(seq, position, alt_allele, strand="+"):
@@ -466,23 +558,32 @@ def apply_mutation(seq, position, alt_allele, strand="+"):
 		print(f"  Minus strand variant: {alt_allele} (reverse) -> {alt_allele_fwd} (forward)")
 	else:
 		alt_allele_fwd = alt_allele
+	alt_upper = alt_allele_fwd.upper()
+	n_alt = len(alt_upper)
+	# Replace positions [pos_0based, pos_0based + n_alt) with the alt allele.
+	# Positions beyond the sequence length are silently clipped (they were N-padded).
 	seq_list = list(seq)
-	seq_list[pos_0based] = alt_allele_fwd.upper()
+	for i, nt in enumerate(alt_upper):
+		idx = pos_0based + i
+		if idx < len(seq_list):
+			seq_list[idx] = nt
 	return ''.join(seq_list)
 
 
 def predict_single_transcript(net, seq, rna_data, region_len, tissue_id_tensor,
-							  device, output_raw_log=False):
+							  cond_id_tensor, device, output_raw_log=False):
 	ohe = _encode_seq_fast(seq, region_len)
 	features = np.concatenate([ohe, rna_data[:, np.newaxis]], axis=1)
 	features_t = torch.from_numpy(features).unsqueeze(0).to(device)
 	tissue_ids = tissue_id_tensor.unsqueeze(0).to(device)
+	cond_ids = cond_id_tensor.unsqueeze(0).to(device)
 	with torch.no_grad():
-		pred_log = net(features_t, tissue_ids).squeeze(0).cpu().numpy()
+		pred_log = net(features_t, tissue_ids, cond_ids).squeeze(0).cpu().numpy()
 	return pred_log if output_raw_log else inverse_log_transform(pred_log)
 
 
-#  Main
+# ═══════════════════════════════════════════════════════════════════════════
+# § 5  Main
 # ═══════════════════════════════════════════════════════════════════════════
 
 def parse_args():
@@ -492,17 +593,22 @@ def parse_args():
 	p.add_argument("--tissue",      required=True,
 				   help="Tissue name (must match tissue_vocab in checkpoint, "
 						"or will use mean embedding for unseen tissues)")
+	p.add_argument("--condition",   required=True,
+				   help="Condition name (must match cond_vocab in checkpoint, "
+						"or will use mean embedding for unseen conditions)")
 	p.add_argument("--tracks_dir",  default="tracks")
 	p.add_argument("--output_dir",  default="predictions")
-	p.add_argument("--region_len",  type=int, default=6000)
-	p.add_argument("--nBins",       type=int, default=1000)
+	p.add_argument("--region_len",  type=int, default=4500)
+	p.add_argument("--nBins",       type=int, default=1500)
 	p.add_argument("--model_type",  default="PosTransModelTCNFiLMRef",
-				   choices=["PosTransModelTCNFiLM", "PosTransModelTCNFiLMRef",
-							"TransModelFiLM"])
-	p.add_argument("--dropout",     type=float, default=0.3)
+				   choices=["PosTransModelTCNFiLM", "PosTransModelTCNFiLMRef", "TransModelFiLM", "PosTransModelFiLMRef"])
+	p.add_argument("--dropout",     type=float, default=None)
 	p.add_argument("--tissue_emb_dim", type=int, default=64)
+	p.add_argument("--cond_emb_dim",   type=int, default=32)
 	p.add_argument("--biotype",     default="protein_coding",
 				   choices=["protein_coding", "non_coding", "all"])
+	p.add_argument("--coordinates",     default="coordinates",
+				   help="Folder with coordinates.txt files (default: coordinates/)")
 	p.add_argument("--psites",      action="store_true")
 	p.add_argument("--batch_size",  type=int, default=16)
 	p.add_argument("--ig_steps",    type=int, default=20)
@@ -517,7 +623,16 @@ def parse_args():
 	p.add_argument("--zero_threshold", type=float, default=0.0001)
 	p.add_argument("--write_rnaseq", action="store_true", default=True)
 	p.add_argument("--write_riboseq", action="store_true", default=True)
-	return p.parse_args()
+	p.add_argument("--shuflledutr", "--shuffledutr", dest="shuflledutr", action="store_true")
+	p.add_argument("--shuffle-seed", dest="shuffle_seed", type=int, default=4)
+	args = p.parse_args()
+	if args.shuflledutr and (args.mutate or args.orfs):
+		p.error("Run the shuffled-UTR control separately from mutation/ORF analyses")
+	if args.shuflledutr:
+		args.output_dir += f"_shuflledutr_seed{args.shuffle_seed}"
+	if args.dropout is None:
+		args.dropout = 0.33 if "TCN" in args.model_type else 0.3
+	return args
 
 
 def main():
@@ -567,6 +682,31 @@ def main():
 	for tname, tid in sorted(tissue_vocab.items(), key=lambda x: x[1]):
 		print(f"    {tid}: {tname}")
 
+	# ── Load condition vocab ──────────────────────────────────────────
+	cond_vocab = hparams.get("cond_vocab", None)
+	num_conditions = hparams.get("num_conditions", None)
+	cond_emb_dim = hparams.get("cond_emb_dim", args.cond_emb_dim)
+
+	if cond_vocab is None:
+		ckpt_dir = os.path.dirname(args.checkpoint)
+		cond_vocab_path = os.path.join(ckpt_dir, "cond_vocab.json")
+		if os.path.exists(cond_vocab_path):
+			with open(cond_vocab_path) as f:
+				cond_vocab = json.load(f)
+			num_conditions = len(cond_vocab)
+			print(f"  Loaded cond_vocab from {cond_vocab_path}")
+
+	if cond_vocab is None:
+		print("ERROR: Cannot find cond_vocab in checkpoint or cond_vocab.json")
+		sys.exit(1)
+
+	if num_conditions is None:
+		num_conditions = len(cond_vocab)
+
+	print(f"  Condition vocabulary ({num_conditions} conditions):")
+	for cname, cid in sorted(cond_vocab.items(), key=lambda x: x[1]):
+		print(f"    {cid}: {cname}")
+
 	# ── Resolve tissue_id ─────────────────────────────────────────────
 	if args.tissue in tissue_vocab:
 		tissue_id = tissue_vocab[args.tissue]
@@ -577,6 +717,17 @@ def main():
 			  f"using mean embedding (id {tissue_id})")
 
 	tissue_id_tensor = torch.tensor(tissue_id, dtype=torch.long)
+
+	# ── Resolve cond_id ───────────────────────────────────────────────
+	if args.condition in cond_vocab:
+		cond_id = cond_vocab[args.condition]
+		print(f"  Condition '{args.condition}' -> id {cond_id} (known)")
+	else:
+		cond_id = num_conditions
+		print(f"  Condition '{args.condition}' not in training vocab -> "
+			  f"using mean embedding (id {cond_id})")
+
+	cond_id_tensor = torch.tensor(cond_id, dtype=torch.long)
 
 	# ── Load model ────────────────────────────────────────────────────
 	ckpt_model_type = hparams.get("model_type", args.model_type)
@@ -590,6 +741,9 @@ def main():
 		num_genomic_features=1, target_length=args.region_len,
 		nbins=args.nBins, num_tissues=num_tissues,
 		tissue_emb_dim=tissue_emb_dim,
+		num_conditions=num_conditions,
+		cond_emb_dim=cond_emb_dim, dropout=hparams.get("dropout", args.dropout),
+		seqno=hparams.get("sequence_input_mode") == "rna_only",
 	)
 
 	state = ckpt["state_dict"]
@@ -616,53 +770,81 @@ def main():
 	# ── Set up output files ───────────────────────────────────────────
 	os.makedirs(args.output_dir, exist_ok=True)
 
+	# transcript_stats.tsv is ALWAYS generated.  Resume-aware: if it already
+	# exists from a previous run, transcripts already written there are not
+	# recalculated -- new transcripts are simply appended.
 	stats_path = os.path.join(args.output_dir, "transcript_stats.tsv")
-	stats_file = open(stats_path, "wt")
-	stats_file.write(
-		"transcript_id\tregion_type\tregion_length\t"
-		"rna_region_mean\tribo_region_mean\twt_region_mean\t"
-		"corr_pred_obs_nonlog\tcorr_pred_obs_log\t"
-		"corr_rna_ribo_nonlog\tcorr_rna_ribo_log\n"
-	)
+	existing_transcript_ids = load_existing_transcript_ids(stats_path)
+	if existing_transcript_ids:
+		print(f"\nResuming: {len(existing_transcript_ids)} transcripts already "
+			  f"in {stats_path} -> will be skipped")
+		stats_file = open(stats_path, "at")
+	else:
+		stats_file = open(stats_path, "wt")
+		stats_file.write(
+			"transcript_id\tregion_type\tregion_length\t"
+			"rna_region_mean\tribo_region_mean\twt_region_mean\t"
+			"corr_pred_obs_nonlog\tcorr_pred_obs_log\t"
+			"corr_rna_ribo_nonlog\tcorr_rna_ribo_log\n"
+		)
 
-	# mutations.tsv is generated when --mutate or --orfs is used
+	# mutations.tsv is generated when --mutate or --orfs is used.  Resume-aware:
+	# variants already present are not recalculated -- new ones are appended.
 	mut_file = None
 	pred_mut_file = None
 	fasta_mut_file = None
+	fasta_mut_file2 = None
 	orfs_fasta_file = None
+	orfs_nucl_fasta_file = None
+	existing_variant_ids = set()
 	if do_variant_analysis:
 		mut_path = os.path.join(args.output_dir, "mutations.tsv")
-		mut_file = open(mut_path, "wt")
-		mut_file.write(
-			"variant_id\ttranscript_id\ttranscript_len\tposition\tref_allele\talt_allele\t"
-			"effect\tclassification\t"
-			"region_type\tregion_length\trna_region_mean\tribo_region_mean\twt_region_mean\tmut_region_mean\t"
-			"log2_fold_change\tabs_diff\t"
-			"corr_pred_obs_nonlog\tcorr_pred_obs_log\t"
-			"corr_rna_ribo_nonlog\tcorr_rna_ribo_log\t"
-			"fiveutr_length\twt_fiveutr_mean\tmut_fiveutr_mean\t"
-			"corr_pred_obs_fiveutr_nonlog\tcorr_pred_obs_fiveutr_log\t"
-			"corr_rna_ribo_fiveutr_nonlog\tcorr_rna_ribo_fiveutr_log\t"
-			"seq_context\tatg_orf_length\tctg_orf_length\n"
-		)
+		existing_variant_ids = load_existing_variant_ids(mut_path)
+		resume_mutations = bool(existing_variant_ids)
+		if resume_mutations:
+			print(f"Resuming: {len(existing_variant_ids)} variants already "
+				  f"in {mut_path} -> will be skipped")
+			mut_file = open(mut_path, "at")
+		else:
+			mut_file = open(mut_path, "wt")
+			mut_file.write(
+				"variant_id\ttranscript_id\ttranscript_len\tposition\tref_allele\talt_allele\t"
+				"effect\tclassification\t"
+				"region_type\tregion_length\trna_region_mean\tribo_region_mean\twt_region_mean\tmut_region_mean\t"
+				"log2_fold_change\tabs_diff\t"
+				"corr_pred_obs_nonlog\tcorr_pred_obs_log\t"
+				"corr_rna_ribo_nonlog\tcorr_rna_ribo_log\t"
+				"fiveutr_length\twt_fiveutr_mean\tmut_fiveutr_mean\t"
+				"corr_pred_obs_fiveutr_nonlog\tcorr_pred_obs_fiveutr_log\t"
+				"corr_rna_ribo_fiveutr_nonlog\tcorr_rna_ribo_fiveutr_log\t"
+				"seq_context\tatg_orf_length\tctg_orf_length\n"
+			)
 
 	if do_mutations:
 		mutations_dir = os.path.join(args.output_dir, "mutations")
 		os.makedirs(mutations_dir, exist_ok=True)
+		_fmode = "at" if resume_mutations else "wt"
 
 		pred_mut_path = os.path.join(mutations_dir, "predictions.bedgraph")
-		pred_mut_file = open(pred_mut_path, "wt")
-		pred_mut_file.write("#chr\tstart\tend\tvariant_id\tbin_idx\tstrand\tpredicted_ribo\tlog2_fc\n")
+		pred_mut_file = open(pred_mut_path, _fmode)
+		if not resume_mutations:
+			pred_mut_file.write("#chr\tstart\tend\tvariant_id\tbin_idx\tstrand\tpredicted_ribo\tlog2_fc\n")
 
 		fasta_mut_path = os.path.join(mutations_dir, "sequences.fasta")
-		fasta_mut_file = open(fasta_mut_path, "wt")
+		fasta_mut_file = open(fasta_mut_path, _fmode)
+
+		fasta_mut_path2 = os.path.join(mutations_dir, "sequences_full.fasta")
+		fasta_mut_file2 = open(fasta_mut_path2, _fmode)
 
 		orfs_fasta_path = os.path.join(mutations_dir, "orfs.fasta")
-		orfs_fasta_file = open(orfs_fasta_path, "wt")
+		orfs_fasta_file = open(orfs_fasta_path, _fmode)
+
+		orfs_nucl_fasta_path = os.path.join(mutations_dir, "orfs_nucl.fasta")
+		orfs_nucl_fasta_file = open(orfs_nucl_fasta_path, _fmode)
 
 	# ── Load data ─────────────────────────────────────────────────────
 	print(f"\nLoading coordinates for {args.species}...")
-	df = load_coords(args.species)
+	df = load_coords(args.species, args.coordinates)
 	if df is None or df.empty:
 		print("ERROR: No coordinates found"); sys.exit(1)
 
@@ -697,8 +879,9 @@ def main():
 	df_filt = df_working.drop('orig_idx', axis=1)
 	orig_indices = df_working['orig_idx'].values
 
+	tissue_condition = f"{args.tissue}_{args.condition}"
 	inp_rna_npy, inp_ribo_npy = _npy_paths(args.tracks_dir, args.species,
-											args.tissue, args.region_len,
+											tissue_condition, args.region_len,
 											args.nBins, args.psites)
 
 	if not os.path.exists(inp_rna_npy):
@@ -716,21 +899,31 @@ def main():
 
 	pool_k = max(1, args.region_len // args.nBins)
 
-	# ── Bedgraph output files ─────────────────────────────────────────
+	# ── Bedgraph output files (resume-aware: append, don't truncate, when
+	#    transcripts have already been written in a previous run) ────────
+	_bg_mode = "at" if existing_transcript_ids else "wt"
 	if not (args.mutate_only and df_filt.empty):
-		pred_file = open(os.path.join(args.output_dir, "predictions.bedgraph"), "wt")
-		rnaseq_file = open(os.path.join(args.output_dir, "rnaseq.bedgraph"), "wt") if args.write_rnaseq else None
-		riboseq_file = open(os.path.join(args.output_dir, "riboseq.bedgraph"), "wt") if (args.write_riboseq and inp_ribo_mm is not None) else None
-		attr_file = open(os.path.join(args.output_dir, "attributions.bedgraph"), "wt") if not args.no_attribution else None
+		pred_file = open(os.path.join(args.output_dir, "predictions.bedgraph"), _bg_mode)
+		rnaseq_file = open(os.path.join(args.output_dir, "rnaseq.bedgraph"), _bg_mode) if args.write_rnaseq else None
+		riboseq_file = open(os.path.join(args.output_dir, "riboseq.bedgraph"), _bg_mode) if (args.write_riboseq and inp_ribo_mm is not None) else None
+		# attributions.bedgraph  — target = sum over CDS bins only
+		attr_file = open(os.path.join(args.output_dir, "attributions.bedgraph"), _bg_mode) if not args.no_attribution else None
+
+		# attributions_total.bedgraph — target = sum over ALL bins (whole transcript)
+		attr_total_file = open(os.path.join(args.output_dir, "attributions_total.bedgraph"), _bg_mode) if not args.no_attribution else None
+
+		# attributions_atg.bedgraph — target = first CDS bin only
+		attr_atg_file = open(os.path.join(args.output_dir, "attributions_atg.bedgraph"), _bg_mode) if not args.no_attribution else None
 	else:
-		pred_file = rnaseq_file = riboseq_file = attr_file = None
+		pred_file = rnaseq_file = riboseq_file = attr_file = attr_total_file = attr_atg_file = None
 
 	# ── Prediction loop ───────────────────────────────────────────────
 	print(f"\nProcessing {len(df_filt)} transcripts (tissue={args.tissue}, "
-		  f"id={tissue_id})...")
+		  f"id={tissue_id}, condition={args.condition}, cond_id={cond_id})...")
 	t0 = time.time()
 	n_done = 0
 	n_skipped = 0
+	n_cached = 0
 	n_orfs_processed = 0
 	n_orfs_not_found = 0
 
@@ -738,6 +931,11 @@ def main():
 		transcript_id = row["id"]
 		seq = row["sequence"]
 		region_annot = row.get("region", "")
+		if args.shuflledutr:
+			if not region_annot:
+				raise ValueError("Shuffled-UTR prediction requires ninth-column CDS annotations")
+			seq = shuffle_five_prime_utr(seq, region_annot, args.shuffle_seed,
+			                             f"{args.species}/{transcript_id}", args.region_len)
 		orig_idx = orig_indices[i]
 
 		if not seq or all(c in "Nn" for c in seq[:args.region_len]):
@@ -761,13 +959,38 @@ def main():
 		chrom = row["chr"]
 		transcript_len = len(genome_map)
 
+		# ── Resume check: skip recalculation of already-written output ──
+		transcript_done = transcript_id in existing_transcript_ids
+
+		new_muts_for_tx = []
+		if mutations and transcript_id in mutations:
+			for mut in mutations[transcript_id]:
+				alt_fwd_check = reverse_complement(mut['alt_allele']) if strand == "-" else mut['alt_allele']
+				vid_check = make_variant_id(transcript_id, mut['position'], alt_fwd_check,
+											 mut['effect'], mut['classification'])
+				if vid_check not in existing_variant_ids:
+					new_muts_for_tx.append(mut)
+
+		new_orfs_for_tx = []
+		if orfs and transcript_id in orfs:
+			for orf_entry in orfs[transcript_id]:
+				if (f"{orf_entry['orf_id']}--start" not in existing_variant_ids or
+						f"{orf_entry['orf_id']}--stop" not in existing_variant_ids):
+					new_orfs_for_tx.append(orf_entry)
+
+		needs_variant_processing = bool(new_muts_for_tx) or bool(new_orfs_for_tx)
+
+		if transcript_done and not needs_variant_processing:
+			n_cached += 1
+			continue
+
 		wt_pred = predict_single_transcript(
 			net, seq, rna_data, args.region_len, tissue_id_tensor,
-			device, args.output_raw_log
+			cond_id_tensor, device, args.output_raw_log
 		)
 
 		# ── Write RNA-seq bedgraph ────────────────────────────────
-		if rnaseq_file is not None:
+		if not transcript_done and rnaseq_file is not None:
 			rna_bins_out = _pool_to_bins(rna_data_nonlog, pool_k, args.nBins)
 			for bin_idx in range(args.nBins):
 				tx_start = bin_idx * pool_k
@@ -778,7 +1001,7 @@ def main():
 					rnaseq_file.write(f"{chrom}\t{g_start}\t{g_end}\t{val:.6f}\t{strand}\t{transcript_id}\t{bin_idx}\n")
 
 		# ── Write observed Ribo-seq bedgraph ──────────────────────
-		if riboseq_file is not None and ribo_data_nonlog is not None:
+		if not transcript_done and riboseq_file is not None and ribo_data_nonlog is not None:
 			ribo_bins_out = _pool_to_bins(ribo_data_nonlog, pool_k, args.nBins)
 			for bin_idx in range(args.nBins):
 				tx_start = bin_idx * pool_k
@@ -789,7 +1012,7 @@ def main():
 					riboseq_file.write(f"{chrom}\t{g_start}\t{g_end}\t{val:.6f}\t{strand}\t{transcript_id}\t{bin_idx}\n")
 
 		# ── Write wildtype predictions bedgraph ───────────────────
-		if pred_file is not None:
+		if not transcript_done and pred_file is not None:
 			for bin_idx in range(args.nBins):
 				tx_start = bin_idx * pool_k
 				tx_end = min(tx_start + pool_k, transcript_len)
@@ -797,8 +1020,19 @@ def main():
 				for g_start, g_end in map_bin_to_genomic_intervals(tx_start, tx_end, genome_map, strand):
 					pred_file.write(f"{chrom}\t{g_start}\t{g_end}\t{wt_pred[bin_idx]:.6f}\t{strand}\t{transcript_id}\t{bin_idx}\n")
 
-		# ── Attribution ───────────────────────────────────────────
-		if attr_file is not None and region_annot:
+		# ── Build features tensor once (shared by both IG passes) ─
+		features_t = None
+		tid_t = None
+		cid_t = None
+		if not transcript_done and (attr_file is not None or attr_total_file is not None or attr_atg_file is not None):
+			ohe = _encode_seq_fast(seq, args.region_len)
+			features = np.concatenate([ohe, rna_data[:, np.newaxis]], axis=1)
+			features_t = torch.from_numpy(features).unsqueeze(0).to(device)
+			tid_t = tissue_id_tensor.unsqueeze(0).to(device)
+			cid_t = cond_id_tensor.unsqueeze(0).to(device)
+
+		# ── Attribution: CDS target (attributions.bedgraph) ──────
+		if not transcript_done and attr_file is not None and region_annot:
 			annot = region_annot[:args.region_len]
 			if len(annot) < args.region_len:
 				annot = annot + "0" * (args.region_len - len(annot))
@@ -809,16 +1043,64 @@ def main():
 			else:
 				cds_mask_bins = annot_arr > 0.5
 			if cds_mask_bins.any():
-				ohe = _encode_seq_fast(seq, args.region_len)
-				features = np.concatenate([ohe, rna_data[:, np.newaxis]], axis=1)
-				features_t = torch.from_numpy(features).unsqueeze(0).to(device)
-				tid_t = tissue_id_tensor.unsqueeze(0).to(device)
-				attributions = integrated_gradients(net, features_t, tid_t, cds_mask_bins, device, n_steps=args.ig_steps)
+				attributions = integrated_gradients(
+					net, features_t, tid_t, cid_t,
+					cds_mask_bins, device, n_steps=args.ig_steps
+				)
 				for bp in range(min(args.region_len, transcript_len)):
 					gpos = genome_map[bp]
 					attr_file.write(f"{chrom}\t{gpos}\t{gpos + 1}\t{attributions[bp]:.6f}\t{strand}\t{transcript_id}\n")
 
-		# ── Region statistics ───────────────────
+		# ── Attribution: first CDS bin only (attributions_atg.bedgraph) ──
+		if not transcript_done and attr_atg_file is not None and region_annot:
+
+			annot = region_annot[:args.region_len]
+			if len(annot) < args.region_len:
+				annot = annot + "0" * (args.region_len - len(annot))
+
+			# first CDS nucleotide
+			first_cds_bp = annot.find("2")
+
+			if first_cds_bp >= 0:
+
+				first_cds_bin = min(first_cds_bp // pool_k, args.nBins - 1)
+
+				atg_mask_bins = np.zeros(args.nBins, dtype=bool)
+				atg_mask_bins[first_cds_bin] = True
+
+				attributions_atg = integrated_gradients(
+					net,
+					features_t,
+					tid_t,
+					cid_t,
+					atg_mask_bins,
+					device,
+					n_steps=args.ig_steps
+				)
+
+				for bp in range(min(args.region_len, transcript_len)):
+					gpos = genome_map[bp]
+					attr_atg_file.write(
+						f"{chrom}\t{gpos}\t{gpos + 1}\t"
+						f"{attributions_atg[bp]:.6f}\t"
+						f"{strand}\t{transcript_id}\n"
+					)
+
+		# ── Attribution: whole-transcript target (attributions_total.bedgraph) ──
+		if not transcript_done and attr_total_file is not None:
+			valid_positions = np.zeros(args.region_len, dtype=bool)
+			for bp, base in enumerate(seq[:min(args.region_len, transcript_len)]):
+				valid_positions[bp] = base.upper() in "ATCG"
+			total_mask_bins = _pool_mask_to_bins(valid_positions, pool_k, args.nBins)
+			attributions_total = integrated_gradients(
+				net, features_t, tid_t, cid_t,
+				total_mask_bins, device, n_steps=args.ig_steps
+			)
+			for bp in range(min(args.region_len, transcript_len)):
+				gpos = genome_map[bp]
+				attr_total_file.write(f"{chrom}\t{gpos}\t{gpos + 1}\t{attributions_total[bp]:.6f}\t{strand}\t{transcript_id}\n")
+
+		# ── Region statistics (always computed) ───────────────────
 		cds_mask = np.array([c == '2' for c in region_annot[:args.region_len]])
 		has_cds = np.any(cds_mask)
 		region_type = "CDS" if has_cds else "transcript"
@@ -857,13 +1139,14 @@ def main():
 			corr_pred_obs_fiveutr_nonlog = corr_pred_obs_fiveutr_log = float('nan')
 			corr_rna_ribo_fiveutr_nonlog = corr_rna_ribo_fiveutr_log = float('nan')
 
-		# ── Transcript_stats.tsv ─────────────────────
-		stats_file.write(
-			f"{transcript_id}\t{region_type}\t{region_length}\t"
-			f"{rna_region_mean:.6f}\t{ribo_region_mean:.6f}\t{wt_region_mean:.6f}\t"
-			f"{corr_pred_obs_nonlog:.6f}\t{corr_pred_obs_log:.6f}\t"
-			f"{corr_rna_ribo_nonlog:.6f}\t{corr_rna_ribo_log:.6f}\n"
-		)
+		# ── Write transcript_stats.tsv (skip if already resumed) ──
+		if not transcript_done:
+			stats_file.write(
+				f"{transcript_id}\t{region_type}\t{region_length}\t"
+				f"{rna_region_mean:.6f}\t{ribo_region_mean:.6f}\t{wt_region_mean:.6f}\t"
+				f"{corr_pred_obs_nonlog:.6f}\t{corr_pred_obs_log:.6f}\t"
+				f"{corr_rna_ribo_nonlog:.6f}\t{corr_rna_ribo_log:.6f}\n"
+			)
 
 		# ── Helper: write one variant row to mutations.tsv ────────
 		def _write_mut_row(variant_id, position, ref_allele, alt_allele_fwd,
@@ -907,21 +1190,31 @@ def main():
 			return l2fc, atg_orf_len, ctg_orf_len
 
 		# ── Process point mutations (--mutate) ────────────────────
-		if mutations and transcript_id in mutations:
-			for mut in mutations[transcript_id]:
+		if new_muts_for_tx:
+			# Write the original (wildtype) full transcript sequence once per transcript
+			if fasta_mut_file2 is not None:
+				fasta_mut_file2.write(f">{transcript_id}--original\n")
+				fasta_mut_file2.write(seq.replace("N", "").replace("n", "") + "\n")
+
+			for mut in new_muts_for_tx:
 				position = mut['position']
 				alt_allele = mut['alt_allele']
-				ref_allele = seq[position - 1] if position <= len(seq) else "N"
+				n_alt = len(alt_allele)
+				pos_0 = position - 1
+				ref_allele = seq[pos_0:pos_0 + n_alt] if pos_0 < len(seq) else "N" * n_alt
+				if len(ref_allele) < n_alt:
+					ref_allele = ref_allele + "N" * (n_alt - len(ref_allele))
 
 				mut_seq = apply_mutation(seq, position, alt_allele, strand)
 				alt_allele_fwd = reverse_complement(alt_allele) if strand == "-" else alt_allele
 
 				mut_pred = predict_single_transcript(
 					net, mut_seq, rna_data, args.region_len, tissue_id_tensor,
-					device, args.output_raw_log
+					cond_id_tensor, device, args.output_raw_log
 				)
 
-				variant_id = f"{mut['variant_id']}--{alt_allele_fwd}--{position}--{mut['effect']}--{mut['classification']}"
+				variant_id = make_variant_id(transcript_id, position, alt_allele_fwd,
+											  mut['effect'], mut['classification'])
 
 				log2_fc, atg_orf_len, ctg_orf_len = _write_mut_row(
 					variant_id, position, ref_allele, alt_allele_fwd,
@@ -942,6 +1235,11 @@ def main():
 					fasta_mut_file.write(f">{variant_id} {log2_fc:.6f}\n")
 					fasta_mut_file.write(mut_seq[:args.region_len].replace("N", "") + "\n")
 
+				# Write full transcript mutant sequence
+				if fasta_mut_file2 is not None:
+					fasta_mut_file2.write(f">{variant_id} {log2_fc:.6f}\n")
+					fasta_mut_file2.write(mut_seq.replace("N", "").replace("n", "") + "\n")
+
 				# Write translated ORF sequences if ATG or CTG ORF found
 				if orfs_fasta_file is not None:
 					if atg_orf_len > 0 or atg_orf_len == -1:
@@ -951,6 +1249,10 @@ def main():
 							if aa_seq:
 								orfs_fasta_file.write(f">{variant_id}|ATG|pos={atg_start + 1}|nt_len={atg_orf_len} {log2_fc:.6f}\n")
 								orfs_fasta_file.write(aa_seq + "\n")
+								if orfs_nucl_fasta_file is not None:
+									nt_seq = get_orf_nt_sequence(mut_seq, atg_start, atg_orf_len)
+									orfs_nucl_fasta_file.write(f">{variant_id}|ATG|pos={atg_start + 1}|nt_len={atg_orf_len} {log2_fc:.6f}\n")
+									orfs_nucl_fasta_file.write(nt_seq + "\n")
 					if ctg_orf_len > 0 or ctg_orf_len == -1:
 						ctg_start = _find_codon_start(mut_seq, position, 'CTG')
 						if ctg_start >= 0:
@@ -958,10 +1260,14 @@ def main():
 							if aa_seq:
 								orfs_fasta_file.write(f">{variant_id}|CTG|pos={ctg_start + 1}|nt_len={ctg_orf_len} {log2_fc:.6f}\n")
 								orfs_fasta_file.write(aa_seq + "\n")
+								if orfs_nucl_fasta_file is not None:
+									nt_seq = get_orf_nt_sequence(mut_seq, ctg_start, ctg_orf_len)
+									orfs_nucl_fasta_file.write(f">{variant_id}|CTG|pos={ctg_start + 1}|nt_len={ctg_orf_len} {log2_fc:.6f}\n")
+									orfs_nucl_fasta_file.write(nt_seq + "\n")
 
 		# ── Process ORF disruptions (--orfs) ──────────────────────
-		if orfs and transcript_id in orfs:
-			for orf_entry in orfs[transcript_id]:
+		if new_orfs_for_tx:
+			for orf_entry in new_orfs_for_tx:
 				orf_id = orf_entry['orf_id']
 				orf_seq = orf_entry['orf_seq']
 
@@ -976,39 +1282,41 @@ def main():
 					continue
 
 				# (a) Disrupt start: first 3 nt → AAA + in-frame ATG/CTG → AAA
-				start_mut_seq = disrupt_orf_start(seq, orf_pos, orf_len)
-				start_pred = predict_single_transcript(
-					net, start_mut_seq, rna_data, args.region_len,
-					tissue_id_tensor, device, args.output_raw_log
-				)
 				start_variant_id = f"{orf_id}--start"
-				ref_start = seq[orf_pos:orf_pos + 3] if orf_pos + 3 <= len(seq) else "NNN"
-				_write_mut_row(
-					start_variant_id,
-					orf_pos + 1,            # 1-based position of ORF start
-					ref_start, "AAA",
-					"orf_start_disruption", "orf_analysis",
-					start_pred,
-					mut_seq_for_context=start_mut_seq
-				)
+				if start_variant_id not in existing_variant_ids:
+					start_mut_seq = disrupt_orf_start(seq, orf_pos, orf_len)
+					start_pred = predict_single_transcript(
+						net, start_mut_seq, rna_data, args.region_len,
+						tissue_id_tensor, cond_id_tensor, device, args.output_raw_log
+					)
+					ref_start = seq[orf_pos:orf_pos + 3] if orf_pos + 3 <= len(seq) else "NNN"
+					_write_mut_row(
+						start_variant_id,
+						orf_pos + 1,            # 1-based position of ORF start
+						ref_start, "AAA",
+						"orf_start_disruption", "orf_analysis",
+						start_pred,
+						mut_seq_for_context=start_mut_seq
+					)
 
 				# (b) Disrupt stop: last 3 nt → AAA
-				stop_mut_seq = disrupt_orf_stop(seq, orf_pos, orf_len)
-				stop_pred = predict_single_transcript(
-					net, stop_mut_seq, rna_data, args.region_len,
-					tissue_id_tensor, device, args.output_raw_log
-				)
 				stop_variant_id = f"{orf_id}--stop"
-				stop_pos_0 = orf_pos + orf_len - 3
-				ref_stop = seq[stop_pos_0:stop_pos_0 + 3] if stop_pos_0 + 3 <= len(seq) else "NNN"
-				_write_mut_row(
-					stop_variant_id,
-					stop_pos_0 + 1,         # 1-based position of stop codon
-					ref_stop, "AAA",
-					"orf_stop_disruption", "orf_analysis",
-					stop_pred,
-					mut_seq_for_context=stop_mut_seq
-				)
+				if stop_variant_id not in existing_variant_ids:
+					stop_mut_seq = disrupt_orf_stop(seq, orf_pos, orf_len)
+					stop_pred = predict_single_transcript(
+						net, stop_mut_seq, rna_data, args.region_len,
+						tissue_id_tensor, cond_id_tensor, device, args.output_raw_log
+					)
+					stop_pos_0 = orf_pos + orf_len - 3
+					ref_stop = seq[stop_pos_0:stop_pos_0 + 3] if stop_pos_0 + 3 <= len(seq) else "NNN"
+					_write_mut_row(
+						stop_variant_id,
+						stop_pos_0 + 1,         # 1-based position of stop codon
+						ref_stop, "AAA",
+						"orf_stop_disruption", "orf_analysis",
+						stop_pred,
+						mut_seq_for_context=stop_mut_seq
+					)
 
 				n_orfs_processed += 1
 
@@ -1021,7 +1329,7 @@ def main():
 				  f"({elapsed:.0f}s, ~{eta:.0f}s remaining)")
 
 	# ── Cleanup ───────────────────────────────────────────────────────
-	for f in [pred_file, rnaseq_file, riboseq_file, attr_file]:
+	for f in [pred_file, rnaseq_file, riboseq_file, attr_file, attr_total_file, attr_atg_file]:
 		if f is not None: f.close()
 	stats_file.close()
 	if mut_file is not None:
@@ -1030,20 +1338,28 @@ def main():
 		pred_mut_file.close()
 	if fasta_mut_file is not None:
 		fasta_mut_file.close()
+	if fasta_mut_file2 is not None:
+		fasta_mut_file2.close()
 	if orfs_fasta_file is not None:
 		orfs_fasta_file.close()
+	if orfs_nucl_fasta_file is not None:
+		orfs_nucl_fasta_file.close()
 
 	elapsed = time.time() - t0
-	print(f"\nDone! {n_done} transcripts processed, {n_skipped} skipped")
+	print(f"\nDone! {n_done} transcripts processed, {n_skipped} skipped, "
+		  f"{n_cached} already cached (resumed)")
 	print(f"  Time: {elapsed:.1f}s")
 	print(f"  Tissue: {args.tissue} (id={tissue_id})")
+	print(f"  Condition: {args.condition} (id={cond_id})")
 	print(f"  Transcript stats: {stats_path}")
 
 	if do_mutations:
 		print(f"  Mutation results: {mut_path}")
 		print(f"  Mutant predictions: {pred_mut_path}")
 		print(f"  Mutant sequences: {fasta_mut_path}")
+		print(f"  Mutant full sequences: {fasta_mut_path2}")
 		print(f"  Translated ORFs: {orfs_fasta_path}")
+		print(f"  ORF nucleotide sequences: {orfs_nucl_fasta_path}")
 	if do_orfs:
 		print(f"  ORF disruption results: {mut_path}")
 		print(f"  ORFs processed: {n_orfs_processed} "
@@ -1053,6 +1369,4 @@ def main():
 
 
 if __name__ == "__main__":
-
 	main()
-

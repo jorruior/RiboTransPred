@@ -52,57 +52,73 @@ def reverse_complement(dna):
 	return reverse_complement_dna
 
 def extract_fasta_sequences(fasta_file, seq_len, intervals, strand, chromosome_length):
-	"""Extract sequences from FASTA file."""
-	sequence = ''
-	for interval in intervals:
-		trimmed_interval = Interval(interval.chrom,
-									max(interval.start+1, 0),
-									min(interval.end+1, chromosome_length))
-
-		seq = str(pyfaidx.Fasta(fasta_file).get_seq(str(trimmed_interval.chrom),
-													trimmed_interval.start,
-													trimmed_interval.end-1).seq.upper())
-		
-		pad_upstream = 'N' * max(-interval.start, 0)
-		pad_downstream = 'N' * max(interval.end - chromosome_length, 0)
-		sequence += pad_upstream + seq + pad_downstream
-
+	"""Extract zero-based, half-open exons, then orient and truncate the transcript."""
+	parts = []
+	with pyfaidx.Fasta(fasta_file) as fasta:
+		for interval in intervals:
+			start = max(0, min(interval.start, chromosome_length))
+			end = max(start, min(interval.end, chromosome_length))
+			seq = str(fasta[str(interval.chrom)][start:end].seq).upper()
+			parts.append('N' * max(-interval.start, 0) + seq +
+					 'N' * max(interval.end - chromosome_length, 0))
+	sequence = ''.join(parts)
 	total_len = len(sequence)
-
-	if strand == "+":
-		if len(sequence) > seq_len:
-			sequence = sequence[:seq_len]
-		elif len(sequence) < seq_len:
-			sequence += 'N' * (seq_len - len(sequence))
-	elif strand == "-":
-		if len(sequence) > seq_len:
-			sequence = sequence[-seq_len:]
-		elif len(sequence) < seq_len:
-			sequence = 'N' * (seq_len - len(sequence)) + sequence
-
 	if strand == '-':
 		sequence = reverse_complement(sequence)
+	return sequence[:seq_len].ljust(seq_len, 'N'), total_len
 
-	return sequence, total_len
 
-def get_species_tissue_from_path(bw_path):
-	"""Extract species and tissue from .bw file path."""
-	# Remove tracks/ prefix and .bw suffix
-	rel_path = bw_path.replace(f"{TRACKS_DIR}/", "").replace(".bw", "")
+def get_species_tissue_condition_from_path(bw_path):
+	"""
+	Extract species, tissue, and condition from .bw file path.
+	Expected structure: tracks/<species>/<tissue>_<condition>/<species>_<tissue>_<condition>_<type>.bw
+	Returns (species, tissue, condition, tissue_condition).
+	"""
+	rel_path = bw_path.replace(f"{TRACKS_DIR}/", "")
 	parts = rel_path.split("/")
-	
-	if len(parts) >= 2:
-		species = parts[0]
-		tissue = parts[1]
-		# Remove species_tissue_ prefix from tissue if present
-		if tissue.startswith(f"{species}_"):
-			tissue = tissue.replace(f"{species}_", "", 1)
-		# Remove _rna or _ribo suffix
-		for suffix in ["_rna", "_ribo", ".psites"]:
-			if tissue.endswith(suffix):
-				tissue = tissue[:-len(suffix)]
-		return species, tissue
-	return None, None
+
+	if len(parts) < 2:
+		return None, None, None, None
+
+	species = parts[0]
+	tissue_condition = parts[1]  # e.g. "heart_ctrl"
+
+	# Strip the filename component (parts[2]) — we only need the directory
+	# The directory name IS tissue_condition, so split on the first underscore
+	# that separates tissue from condition. We rely on the directory name directly.
+	# Convention: tissue_condition dir contains species_tissue_condition_<type>.bw
+	# We recover tissue and condition by stripping the species prefix from the filename.
+	filename = os.path.basename(bw_path)
+	# Remove species prefix: "human_heart_ctrl_rna.bw" -> "heart_ctrl_rna.bw"
+	if filename.startswith(f"{species}_"):
+		remainder = filename[len(species)+1:]
+	else:
+		remainder = filename
+
+	# Remove seq-type suffixes to get tissue_condition
+	for suffix in ("_rna.bw", "_ribo.psites.bw", "_ribo.bw"):
+		if remainder.endswith(suffix):
+			remainder = remainder[:-len(suffix)]
+			break
+	else:
+		# Fallback: strip .bw and any trailing _rna/_ribo/_psites token
+		remainder = remainder.replace(".bw", "")
+		for tok in ("_rna", "_ribo", ".psites"):
+			if remainder.endswith(tok):
+				remainder = remainder[:-len(tok)]
+
+	# remainder is now "tissue_condition", e.g. "heart_ctrl"
+	# tissue_condition directory name should match; trust the directory name as ground truth
+	# Split into tissue (all but last token) and condition (last token)
+	tc_parts = tissue_condition.split("_")
+	if len(tc_parts) < 2:
+		# No condition token found — treat whole string as tissue, condition unknown
+		return species, tissue_condition, "unknown", tissue_condition
+
+	condition = tc_parts[-1]
+	tissue = "_".join(tc_parts[:-1])
+
+	return species, tissue, condition, tissue_condition
 
 def extract_chromosome_lengths(fasta_file):
 	"""Extract chromosome lengths from FASTA file."""
@@ -136,8 +152,8 @@ def parse_cds_positions(gtf_file):
 				continue
 				
 			feature = parts[2]
-			start = int(parts[3])
-			end = int(parts[4]) + 1
+			start = int(parts[3]) - 1
+			end = int(parts[4])
 			attributes = parts[8]
 			
 			# Parse attributes
@@ -258,7 +274,7 @@ def create_cds_vector(transcript_id, all_coords, cds_dict, start_codon_dict, sto
 	Create CDS vector for a transcript.
 	0 = no CDS, 2 = CDS (including stop codon)
 	Only mark CDS if transcript has BOTH start_codon and stop_codon annotations.
-	Vector is trimmed to maximum 6000 nucleotides.
+	Vector is trimmed to maximum REGION_LEN nucleotides.
 	"""
 	# Check if transcript has both start and stop codon annotations
 	has_start_codon = transcript_id in start_codon_dict and len(start_codon_dict[transcript_id]) > 0
@@ -267,65 +283,47 @@ def create_cds_vector(transcript_id, all_coords, cds_dict, start_codon_dict, sto
 	# If missing either start or stop codon, return all zeros
 	if not (has_start_codon and has_stop_codon):
 		if strand == "-" and all_coords:
-			# For - strand, return reversed vector of zeros
-			return "0" * min(len(all_coords), 6000)
-		return "0" * min(len(all_coords), 6000) if all_coords else ""
+			return "0" * min(len(all_coords), REGION_LEN)
+		return "0" * min(len(all_coords), REGION_LEN) if all_coords else ""
 	
 	# Check if transcript has CDS regions
 	if transcript_id not in cds_dict or not all_coords:
 		if strand == "-" and all_coords:
-			# For - strand, return reversed vector of zeros
-			return "0" * min(len(all_coords), 6000)
-		return "0" * min(len(all_coords), 6000) if all_coords else ""
+			return "0" * min(len(all_coords), REGION_LEN)
+		return "0" * min(len(all_coords), REGION_LEN) if all_coords else ""
 	
 	cds_regions = cds_dict[transcript_id]
 	
-	# Create a vector of zeros (trimmed to max 6000)
-	vector_length = min(len(all_coords), 6000)
+	# Create a vector of zeros (trimmed to max REGION_LEN)
+	vector_length = min(len(all_coords), REGION_LEN)
 	cds_vector = [0] * vector_length
 	
-	# Only consider coordinates up to 6000
-	limited_coords = all_coords[:vector_length]
+	# Only consider coordinates up to REGION_LEN
+	oriented_coords = all_coords[::-1] if strand == "-" else all_coords
+	limited_coords = oriented_coords[:vector_length]
 	
 	# Mark CDS positions
 	for cds_start, cds_end in cds_regions:
-		# Find positions that overlap with this CDS region
 		for i, coord in enumerate(limited_coords):
 			if cds_start <= coord < cds_end:
 				cds_vector[i] = 2
 	
-	if strand == "+":
-		# For + strand: find stop codon positions from GTF
-		# Get stop codon region
-		stop_codons = stop_codon_dict.get(transcript_id, [])
-		for stop_start, stop_end in stop_codons:
-			# Mark stop codon positions as CDS (2)
-			for i, coord in enumerate(limited_coords):
-				if stop_start <= coord < stop_end:
-					cds_vector[i] = 2
-					
-	elif strand == "-":
-		# For - strand: find stop codon positions from GTF
-		# Get stop codon region
-		stop_codons = stop_codon_dict.get(transcript_id, [])
-		for stop_start, stop_end in stop_codons:
-			# Mark stop codon positions as CDS (2)
-			for i, coord in enumerate(limited_coords):
-				if stop_start <= coord < stop_end:
-					cds_vector[i] = 2
+	# Mark stop codon positions (same logic for + and - strand)
+	stop_codons = stop_codon_dict.get(transcript_id, [])
+	for stop_start, stop_end in stop_codons:
+		for i, coord in enumerate(limited_coords):
+			if stop_start <= coord < stop_end:
+				cds_vector[i] = 2
 	
 	# Convert to string representation
 	cds_string = ''.join(str(x) for x in cds_vector)
 	
-	# Reverse the string for - strand to match transcript orientation
-	if strand == "-":
-		cds_string = cds_string[::-1]
 	
 	return cds_string
 
 def generate_coordinates(species, bw_paths):
 	"""Generate coordinates file for a species if not already done."""
-	coords_file = os.path.join(COORDS_DIR, f"{species}_coordinates.txt")
+	coords_file = os.path.join(COORDS_DIR, f"{species}_coordinates_v2.txt")
 	
 	# Skip if coordinates already exist
 	if os.path.exists(coords_file):
@@ -382,26 +380,25 @@ def generate_coordinates(species, bw_paths):
 			
 			# Get transcript biotype and strand from first region
 			transcript_biotype = group.iloc[0]['transcript_biotype']
-			strand = group.iloc[0]['strand']  # Get strand information
+			strand = group.iloc[0]['strand']
 			
 			for _, region in group.iterrows():
 				chrom = region['chr']
-				start = region['start'] + 1
+				start = region['start']
 				end = region['end']
 				chromosome_length = int(chromosome_lengths.get(chrom, 1e9))
 				
 				interval = Interval(chrom, start, end)
 				intervals_gene.append(interval)
 				
-				for pos in range(max(start, 0), min((end+1), chromosome_length)):
+				for pos in range(max(start, 0), min(end, chromosome_length)):
 					all_coords.append(pos)
 			
-			# Get CDS vector with strand information (max 6000 nucleotides)
+			# Get CDS vector with strand information (max REGION_LEN nucleotides)
 			if all_coords:
 				cds_vector = create_cds_vector(transcript_id, all_coords, cds_dict, 
 											  start_codon_dict, stop_codon_dict,
 											  chromosome_lengths.get(chrom, 1e9), strand)
-				# Count transcripts with complete CDS info
 				if "2" in cds_vector:
 					complete_cds_count += 1
 				else:
@@ -433,9 +430,8 @@ def generate_coordinates(species, bw_paths):
 			gt_len = len(all_coords) if all_coords else 0
 			chrom = region['chr'] if not intervals_gene else intervals_gene[0].chrom
 			
-			# Write to coordinates file with CDS vector as additional column
 			out_f.write(f"{chrom}\t{min(all_coords) if all_coords else 0}\t"
-					   f"{max(all_coords) if all_coords else 0}\t"
+					   f"{max(all_coords) + 1 if all_coords else 0}\t"
 					   f"{transcript_id}\t{total_len}\t{transcript_biotype}\t"
 					   f"{len(sequence)}\t{sequence}\t{cds_vector}\n")
 	
@@ -444,7 +440,7 @@ def generate_coordinates(species, bw_paths):
 	print(f"    Transcripts without complete CDS: {incomplete_cds_count}")
 	return coords_file
 
-def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths_file):
+def process_rnaseq(bw_file, species, tissue, condition, bed_file, fasta_file, chrom_lengths_file):
 	"""Process RNA-seq .bw file."""
 	print(f"  Processing RNA-seq: {os.path.basename(bw_file)}")
 	
@@ -473,7 +469,7 @@ def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths
 		
 		for _, region in group.iterrows():
 			chrom = region['chr']
-			start = region['start'] + 1
+			start = region['start']
 			end = region['end']
 			strand = region['strand']
 			chromosome_length = int(chromosome_lengths.get(chrom, 1e9))
@@ -481,7 +477,7 @@ def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths
 			interval = Interval(chrom, start, end)
 			trimmed_interval = Interval(interval.chrom,
 										max(interval.start, 0),
-										min(interval.end+1, chromosome_length))
+										min(interval.end, chromosome_length))
 			
 			if chrom in bw.chroms():
 				signals = np.array(bw.values(chrom, trimmed_interval.start, 
@@ -493,7 +489,7 @@ def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths
 			pad_upstream = np.array([0] * max(-interval.start, 0)).astype(np.float32).tolist()
 			pad_downstream = np.array([0] * max(interval.end - chromosome_length, 0)).astype(np.float32).tolist()
 			tmp = pad_upstream + signals + pad_downstream
-			arr = np.array(tmp).astype(np.float32)
+			arr = np.nan_to_num(np.array(tmp, dtype=np.float32), nan=0.0)
 			group_target.append(arr)
 		
 		# Combine regions
@@ -509,8 +505,7 @@ def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths
 			group_target = np.flip(group_target)
 		
 		# Filter by expression
-		if group_target.size > 0 and np.mean(group_target < RNACUTOFF) > 0.7:
-			group_target = np.zeros_like(group_target)
+		if group_target.size > 0 and np.mean(group_target < RNACUTOFF) > 0.9:
 			excluded_transcripts.append(transcript_id)
 		
 		# Resize to REGION_LEN
@@ -531,23 +526,28 @@ def process_rnaseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths
 	output_dir = os.path.dirname(bw_file)
 	
 	# Non-log version
-	nolog_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_rnaseq_final.pt")
+	nolog_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_rnaseq_final_v2.pt")
 	torch.save(torch.Tensor(target), nolog_file)
 	
 	# Log version
-	log_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_log_rnaseq_final.pt")
+	log_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_log_rnaseq_final_v2.pt")
 	target_log = np.log(target + 0.0001)
 	torch.save(torch.Tensor(target_log), log_file)
+	# Do not turn low-expression observations into synthetic zero targets.
+	excluded_set = set(excluded_transcripts)
+	eligible = np.array([tid not in excluded_set for tid, _ in grouped_regions], dtype=bool)
+	np.save(os.path.join(output_dir, f"{base_name}_{REGION_LEN}_eligible_v2.npy"), eligible)
+
 	
 	bw.close()
 	
 	print(f"    Generated: {os.path.basename(nolog_file)}")
 	print(f"    Generated: {os.path.basename(log_file)}")
-	print(f"    Excluded {len(excluded_transcripts)} transcripts due to low expression")
+	print(f"    Excluded {len(excluded_transcripts)} transcripts from training due to low expression (signals retained)")
 	
 	return excluded_transcripts
 
-def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_lengths_file, excluded_transcripts):
+def process_riboseq(bw_file, species, tissue, condition, bed_file, fasta_file, chrom_lengths_file, excluded_transcripts):
 	"""Process Ribo-seq or P-sites .bw file."""
 	is_psites = "psites" in bw_file
 	seq_type = "P-sites" if is_psites else "Ribo-seq"
@@ -577,7 +577,7 @@ def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_length
 		
 		for _, region in group.iterrows():
 			chrom = region['chr']
-			start = region['start'] + 1
+			start = region['start']
 			end = region['end']
 			strand = region['strand']
 			chromosome_length = int(chromosome_lengths.get(chrom, 1e9))
@@ -585,7 +585,7 @@ def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_length
 			interval = Interval(chrom, start, end)
 			trimmed_interval = Interval(interval.chrom,
 										max(interval.start, 0),
-										min(interval.end+1, chromosome_length))
+										min(interval.end, chromosome_length))
 			
 			if chrom in bw.chroms():
 				signals = np.array(bw.values(chrom, trimmed_interval.start,
@@ -597,7 +597,7 @@ def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_length
 			pad_upstream = np.array([0] * max(-interval.start, 0)).astype(np.float32).tolist()
 			pad_downstream = np.array([0] * max(interval.end - chromosome_length, 0)).astype(np.float32).tolist()
 			tmp = pad_upstream + signals + pad_downstream
-			arr = np.array(tmp).astype(np.float32)
+			arr = np.nan_to_num(np.array(tmp, dtype=np.float32), nan=0.0)
 			group_target.append(arr)
 		
 		# Combine regions
@@ -623,9 +623,7 @@ def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_length
 		reshaped_arr = group_target.reshape(-1, int(REGION_LEN / NBINS))
 		averages = np.mean(reshaped_arr, axis=1)
 		
-		# Set to zero if excluded from RNA-seq
-		if transcript_id in excluded_transcripts:
-			averages = np.zeros_like(averages)
+		# Retain measured signal; RNA eligibility is a separate training mask.
 		
 		target.append(averages)
 	
@@ -638,11 +636,11 @@ def process_riboseq(bw_file, species, tissue, bed_file, fasta_file, chrom_length
 	output_dir = os.path.dirname(bw_file)
 	
 	# Non-log version
-	nolog_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_{NBINS}_riboseq_final.pt")
+	nolog_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_{NBINS}_riboseq_final_v2.pt")
 	torch.save(torch.Tensor(target), nolog_file)
 	
 	# Log version
-	log_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_{NBINS}_log_riboseq_final.pt")
+	log_file = os.path.join(output_dir, f"{base_name}_{REGION_LEN}_{NBINS}_log_riboseq_final_v2.pt")
 	target_log = np.log(target + 0.0001)
 	torch.save(torch.Tensor(target_log), log_file)
 	
@@ -678,43 +676,43 @@ def main():
 	# First pass: Identify all species and generate coordinates
 	print("Generating coordinates files...")
 	for bw_file in bw_files:
-		species, tissue = get_species_tissue_from_path(bw_file)
+		species, tissue, condition, tissue_condition = get_species_tissue_condition_from_path(bw_file)
 		if species and species not in species_track:
 			species_track[species] = {
-				'tissues': set(),
+				'tissue_conditions': set(),
 				'coords_generated': False
 			}
 			
-			# Generate coordinates for this species
+			# Generate coordinates for this species (species-level, not per condition)
 			coords_file = generate_coordinates(species, [bw_file])
 			species_track[species]['coords_generated'] = (coords_file is not None)
 		
-		if species and tissue:
-			species_track[species]['tissues'].add(tissue)
+		if species and tissue_condition:
+			species_track[species]['tissue_conditions'].add(tissue_condition)
 	
 	print()
 	
-	# Second pass: Process files by species and tissue
+	# Second pass: Process files by species and tissue_condition
 	processed_count = 0
 	error_count = 0
 	
-	# Organize files by species and tissue
+	# Organize files by species and tissue_condition
 	file_dict = defaultdict(lambda: defaultdict(list))
 	
 	for bw_file in bw_files:
-		species, tissue = get_species_tissue_from_path(bw_file)
-		if species and tissue:
-			file_dict[species][tissue].append(bw_file)
+		species, tissue, condition, tissue_condition = get_species_tissue_condition_from_path(bw_file)
+		if species and tissue_condition:
+			file_dict[species][tissue_condition].append(bw_file)
 	
 	# Process each species
-	for species, tissues in file_dict.items():
+	for species, tissue_conditions in file_dict.items():
 		print(f"Processing species: {species}")
 		print(f"-" * 40)
 		
 		# Check if coordinates were generated
 		if not species_track.get(species, {}).get('coords_generated', False):
 			print(f"  ERROR: Coordinates not generated for {species}, skipping")
-			error_count += len([f for t in tissues.values() for f in t])
+			error_count += len([f for tc in tissue_conditions.values() for f in tc])
 			continue
 		
 		# Get required files for this species
@@ -724,42 +722,44 @@ def main():
 		chrom_lengths_file = os.path.join(COORDS_DIR, f"{species}_chrom_lengths.txt")
 		
 		# Check if required files exist
-		missing_files = []
-		for f in [gtf_file, fasta_file, bed_file, chrom_lengths_file]:
-			if not os.path.exists(f):
-				missing_files.append(f)
+		missing_files = [f for f in [gtf_file, fasta_file, bed_file, chrom_lengths_file]
+						 if not os.path.exists(f)]
 		
 		if missing_files:
 			print(f"  ERROR: Missing required files: {missing_files}")
-			error_count += len([f for t in tissues.values() for f in t])
+			error_count += len([f for tc in tissue_conditions.values() for f in tc])
 			continue
 		
-		# Process each tissue
-		for tissue, tissue_files in tissues.items():
-			print(f"  Tissue: {tissue}")
+		# Process each tissue_condition
+		for tissue_condition, tc_files in tissue_conditions.items():
+			# Recover tissue and condition for display/passing downstream
+			tc_parts = tissue_condition.split("_")
+			condition = tc_parts[-1]
+			tissue = "_".join(tc_parts[:-1])
+
+			print(f"  Tissue: {tissue}, Condition: {condition} [{tissue_condition}]")
 			
 			# Separate RNA-seq and Ribo-seq files
-			rna_files = [f for f in tissue_files if "_rna.bw" in f]
-			ribo_files = [f for f in tissue_files if "_ribo.bw" in f and "psites" not in f]
-			psites_files = [f for f in tissue_files if "psites.bw" in f]
+			rna_files    = [f for f in tc_files if "_rna.bw" in f]
+			ribo_files   = [f for f in tc_files if "_ribo.bw" in f and "psites" not in f]
+			psites_files = [f for f in tc_files if "psites.bw" in f]
 			
 			# Process RNA-seq first to get excluded transcripts
 			excluded_transcripts = []
-			if rna_files:
-				for rna_file in rna_files:
-					try:
-						excluded = process_rnaseq(rna_file, species, tissue, 
-												 bed_file, fasta_file, chrom_lengths_file)
-						excluded_transcripts.extend(excluded)
-						processed_count += 1
-					except Exception as e:
-						print(f"    ERROR processing {os.path.basename(rna_file)}: {e}")
-						error_count += 1
+			for rna_file in rna_files:
+				try:
+					excluded = process_rnaseq(rna_file, species, tissue, condition,
+											 bed_file, fasta_file, chrom_lengths_file)
+					excluded_transcripts.extend(excluded)
+					processed_count += 1
+				except Exception as e:
+					print(f"    ERROR processing {os.path.basename(rna_file)}: {e}")
+					error_count += 1
 			
 			# Process Ribo-seq files
 			for ribo_file in ribo_files:
 				try:
-					process_riboseq(ribo_file, species, tissue, 
+					process_riboseq(ribo_file, species, tissue, condition,
 								   bed_file, fasta_file, chrom_lengths_file, excluded_transcripts)
 					processed_count += 1
 				except Exception as e:
@@ -769,7 +769,7 @@ def main():
 			# Process P-sites files
 			for psites_file in psites_files:
 				try:
-					process_riboseq(psites_file, species, tissue,
+					process_riboseq(psites_file, species, tissue, condition,
 								   bed_file, fasta_file, chrom_lengths_file, excluded_transcripts)
 					processed_count += 1
 				except Exception as e:
@@ -788,9 +788,9 @@ def main():
 	print()
 	print(f"Files in {COORDS_DIR}/:")
 	for species in species_track.keys():
-		coords_file = os.path.join(COORDS_DIR, f"{species}_coordinates.txt")
-		bed_file = os.path.join(COORDS_DIR, f"{species}.bed")
-		chrom_file = os.path.join(COORDS_DIR, f"{species}_chrom_lengths.txt")
+		coords_file = os.path.join(COORDS_DIR, f"{species}_coordinates_v2.txt")
+		bed_file    = os.path.join(COORDS_DIR, f"{species}.bed")
+		chrom_file  = os.path.join(COORDS_DIR, f"{species}_chrom_lengths.txt")
 		
 		for fname, fpath in [("coordinates", coords_file), ("BED", bed_file), ("chrom lengths", chrom_file)]:
 			if os.path.exists(fpath):
@@ -800,16 +800,16 @@ def main():
 	print()
 	print("Output structure in tracks/:")
 	print("  species/")
-	print("  └── tissue/")
-	print("      ├── species_tissue_rna.bw")
-	print(f"      ├── species_tissue_rna_{REGION_LEN}_log_rnaseq_final.pt")
-	print(f"      ├── species_tissue_rna_{REGION_LEN}_rnaseq_final.pt")
-	print("      ├── species_tissue_ribo.bw")
-	print(f"      ├── species_tissue_ribo_{REGION_LEN}_{NBINS}_log_riboseq_final.pt")
-	print(f"      ├── species_tissue_ribo_{REGION_LEN}_{NBINS}_riboseq_final.pt")
-	print("      ├── species_tissue_ribo.psites.bw")
-	print(f"      ├── species_tissue_ribo.psites_{REGION_LEN}_{NBINS}_log_riboseq_final.pt")
-	print(f"      └── species_tissue_ribo.psites_{REGION_LEN}_{NBINS}_riboseq_final.pt")
+	print("  └── tissue_condition/")
+	print("      ├── species_tissue_condition_rna.bw")
+	print(f"      ├── species_tissue_condition_rna_{REGION_LEN}_log_rnaseq_final_v2.pt")
+	print(f"      ├── species_tissue_condition_rna_{REGION_LEN}_rnaseq_final_v2.pt")
+	print("      ├── species_tissue_condition_ribo.bw")
+	print(f"      ├── species_tissue_condition_ribo_{REGION_LEN}_{NBINS}_log_riboseq_final_v2.pt")
+	print(f"      ├── species_tissue_condition_ribo_{REGION_LEN}_{NBINS}_riboseq_final_v2.pt")
+	print("      ├── species_tissue_condition_ribo.psites.bw")
+	print(f"      ├── species_tissue_condition_ribo.psites_{REGION_LEN}_{NBINS}_log_riboseq_final_v2.pt")
+	print(f"      └── species_tissue_condition_ribo.psites_{REGION_LEN}_{NBINS}_riboseq_final_v2.pt")
 	print()
 	print("Processing complete")
 

@@ -1,0 +1,5 @@
+# bam_path species tissue condition dataset
+/path/to/mouse_heart_rna.bam mouse heart adult training
+/path/to/mouse_heart_ribo.bam mouse heart adult training
+/path/to/mouse_brain_rna.bam mouse brain adult test
+/path/to/mouse_brain_ribo.bam mouse brain adult test

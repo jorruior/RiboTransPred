@@ -1,174 +1,278 @@
-# RiboTransPred (v0.1)
+# RiboTransPred
 
-**RiboTransPred** is a causal Temporal Convolutional Network conditioned on tissue identity via Feature-wise Linear Modulation and designed to predict Ribo-seq signal profiles using DNA sequence and RNA-seq coverage as input. The repository also includes a collection of uORFs used in the original publication.
-
-RiboTransPred is released under the MIT License.
-
----
+RiboTransPred trains a neural network to predict Ribo-seq coverage along spliced transcripts from nucleotide sequence and matched RNA-seq coverage. This guide covers reference preparation, training-data preparation, tissue- and condition-aware training with `PosTransModelTCNFiLMRef`, and prediction of Ribo-seq coverage from sequence and RNA-seq.
 
 ## Overview
 
-This repository provides scripts to:
-
-1. Parse genome and transcriptome data for given species.
-2. Normalize and convert RNA-seq and Ribo-seq data from BAM format.
-3. Train a deep learning model on the processed data.
-4. Predict Ribo-seq data using sequence and RNA-seq as input.
-
----
-
-## Citation
-
-If you use this repository or any part of the codebase in your work, please cite: Ruiz-Orera, Miller, Greiner et al. Nature Cardiovascular Research 2024
-
----
+1. Prepare matching genome and transcript annotations.
+2. Normalize coverage and extract transcript features.
+3. Train a model conditioned on tissue and experimental condition.
+4. Predict transcript Ribo-seq coverage from sequence and RNA-seq.
 
 ## Installation
 
-RiboDeepPred works a series of bash scripts described in overview. Clone this repository and install the following prerequisites:
-
-- Python 3.9
-- Pytorch 2.5.1 (cuda 12.1 or compatible)
-- Torchvision 0.20.1
-- FlashAttention-2 (2.7.4)
-- Other libraries (described in `environment.yml`)
-
-Alternatively, clone this repository and create the Conda environment using the provided `environment.yml` file:
+Use Linux with Bash and a CUDA-capable NVIDIA GPU for training. The supplied job scripts use SLURM. Run commands from the repository root.
 
 ```bash
-conda env create -f environment.yml
-conda activate ribotranspred
+mamba env create -f environment.yml
+mamba activate ribotranspred
+mkdir -p genomes coordinates tracks logs results_tissues
 ```
 
-FlashAttention-2 is not available via conda and must be installed separately.
-You can install it via pip:
+`environment.yml` includes PyTorch with CUDA 12.1, Lightning, the Python preprocessing and plotting dependencies, deepTools, samtools and gffread. Select a compatible PyTorch/CUDA build if your machine requires a different CUDA runtime. The environment name used by the supplied scripts is `ribotranspred`.
+
+Before submitting jobs, adapt the SLURM partition, GPU type, memory, time limit and network interfaces to your cluster. The training launcher requests two nodes with eight GPUs per node. For one GPU, use the direct Python command below.
+
+## 1. Prepare genomes and annotations
+
+For every species, obtain a genome FASTA and matching Ensembl-style GTF from the same assembly and annotation release. The GTF must contain exon and CDS annotations, transcript identifiers, and `transcript_biotype` attributes for protein-coding selection. Chromosome names must agree with the aligned BAM files.
+
+Use the species label from your sample manifest in the filenames:
+
+```text
+genomes/<species>.fa
+coordinates/<species>.gtf
+genomes/<species>.transcripts.fa
+```
+
+For example, after downloading and decompressing mouse references:
 
 ```bash
-pip install flash-attn --no-build-isolation
+cp /path/to/mouse_genome.fa genomes/mouse.fa
+cp /path/to/mouse_annotation.gtf coordinates/mouse.gtf
+samtools faidx genomes/mouse.fa
+gffread coordinates/mouse.gtf -g genomes/mouse.fa \
+  -w genomes/mouse.transcripts.fa
 ```
 
----
+Alternatively, provide the matching transcript FASTA from the annotation provider. Transcript FASTA identifiers must match GTF transcript identifiers. Repeat for each species. Reference files are local inputs and are excluded from Git.
 
-## Required Annotation Files
+## 2. Prepare coverage and transcript features
 
-RiboTransPreds requires genome and transcriptome annotations for each supported species.
+### Sample manifest
 
-Directory structure:
-
-```
-genomes/
-  ├── [species].fa
-  ├── [species].transcripts.fa
-
-coordinates/
-  ├── [species].gtf
-```
-
-### File Descriptions
-
-- `genomes/[species].fa`  
-  Genome FASTA file for the species.  
-  Chromosome names **must match exactly** those used in the corresponding GTF file.
-
-- `genomes/[species].transcripts.fa`  
-  Transcriptome FASTA file for the species.  
-  Transcript identifiers (`transcript_id`) **must match exactly** those used in the GTF file.
-
-- `coordinates/[species].gtf`  
-  Gene annotation file in standard Ensembl/GENCODE GTF format.  
-  Chromosome and transcript identifiers must be consistent with the FASTA files.
-
-### Important Notes
-
-- All files must use consistent naming conventions.
-- Mismatched chromosome or transcript identifiers will cause downstream errors.
-- It is strongly recommended to use genome, transcriptome, and GTF files from the same Ensembl/GENCODE release.
-
----
-
-## :monkey: 1. Parsing Genome and Transcriptome Data
-
-Before training the model, genomic and transcriptomic data must be parsed and preprocessed.  
-You must specify the set of tracks to process using a configuration file.
-
-Run:
+Copy the example and replace its paths and labels:
 
 ```bash
-bash 1_prepare_data.sh tracks.txt
+cp tracks.example.txt tracks.txt
 ```
 
-**`tracks.txt`** — Track specification file used for data preparation.
+Use five whitespace-separated fields, without a header; lines starting with `#` are comments:
 
-Each line must follow this format:
-
+```text
+/path/to/mouse_heart_rna.bam mouse heart adult training
+/path/to/mouse_heart_ribo.bam mouse heart adult training
+/path/to/mouse_brain_rna.bam mouse brain adult test
+/path/to/mouse_brain_ribo.bam mouse brain adult test
 ```
-<bam_file> <species> <tissue> <dataset>
-```
 
-#### Field Description
+The fields are BAM path, species, tissue, condition and dataset (`training` or `test`). Provide coordinate-sorted, indexed RNA-seq and Ribo-seq BAMs for each sample. Basenames must identify the assay with `rna` or `ribo`. Each species/tissue/condition combination should identify one matched RNA/Ribo pair; pool replicates before this step if needed. Tissue and condition labels also select learned embeddings that condition the model through FiLM layers. Use consistent labels across samples.
 
-- `<bam_file>` — Path to the BAM file
-- `<species>` — Species identifier (must match annotation filenames)
-- `<tissue>` — Tissue name
-- `<training/test>` — Label specifying if the sample is used for training or test
-
-📌 **Note:**  The tracks files must contain at least one Ribo-seq and one RNA-seq row per tissue and species. Ribo-seq files must included the tag "ribo" in the name, and RNA-seq files must include the tag "rna".
-
----
-
-## 2. Preparing RNA-seq and Ribo-seq Data
-
-To convert RNA-seq and Ribo-seq BAM files into a suitable format for model training, run:
+### Generate coverage
 
 ```bash
-bash 2_extract_features.sh
+sbatch 1_prepare_data.sh tracks.txt
 ```
 
-📌 **Note:**  Please note that, as indicated above, the annotation files are not in the repository and need to be downloaded from the corresponding databases into the folders "coordinates" and "genomes".
+The script produces per-base RNA, Ribo and P-site BigWigs under `tracks/<species>/<tissue>_<condition>/`. Coverage is RPKM-normalized. Ribo footprints are restricted to lengths 28-30, and P-site tracks use a fixed offset of 12. Review these settings for your library preparation.
 
----
+Wait for this job to finish successfully before extracting features.
 
-## 3. Training the Model
-
-Once the data is prepared, you can train the model using:
+### Extract features
 
 ```bash
-bash 3_train_model_tissue.sh tracks.txt
+sbatch 2_extract_features.sh
 ```
 
-📌 **Notes:**
-
-- Hyperparameters are included in the bash script.
-- Training is computationally intensive. We recommend using multiple GPUs if available.
-
----
-
-## 4. Prediction of Ribo-seq values
-
-Once the model has finished training, you can use RNA-seq and sequence data to predict Ribo-seq normalized log-values for all transcripts in a species and tissue. To run predictions, use:
+The default configuration is 4,500 nt, 1,500 output bins and a raw RNA coverage cutoff of 5. To run extraction directly:
 
 ```bash
-bash 4_predict_model.sh model.ckpt chimp heart
+python scripts/extract_cov_features.py 4500 1500 5
 ```
 
-**`model.ckpt`** — Model output generated by training. (model_manuscript.ckpt is the model generated for the manuscript)
+Extraction discovers BigWigs under `tracks/` and requires matching references for each species found. It splices exons in transcript orientation, trims long transcripts at the 3-prime end, and pads short transcripts with Ns. It generates transcript sequences, CDS masks, RNA features, Ribo targets and RNA eligibility masks. Coverage is transformed with `log(coverage + 0.0001)`; 1,500 bins correspond to 3 nt each.
 
-**Outputs:**
+Transcripts with more than 90% of bases below the raw RNA cutoff are excluded through the eligibility mask. This filter is computed on the spliced transcript before truncation. Use the same transcript length and bin count for extraction and training. Keep each feature set together with the coordinate tables and references used to create it. Use a separate working directory when preparing an incompatible feature configuration; existing coordinate tables are reused.
 
-- ``transcript_stats.tsv`` : Tabulated file with information about Ribo-seq prediction and correlation with observed values.
-- ``predictions.bedgraph``: BEDGraph file with the predicted normalized nonlog-values of Ribo-seq for each bin.
-- ``attributions.bedgraph``: BEDGraph file with the atribution scores of each nucleotide position in each bin.
-- ``riboseq.bedgraph``: BEDGraph file with the initial observed normalized nonlog-values of Ribo-seq for each bin.
-- ``rnaseq.bedgraph``: BEDGraph file with the predicted normalized nonlog-values of Ribo-seq for each bin.
-    
----
+Generated files include:
 
-## uORFs and CDSs used in the original study
+| Location or suffix | Content |
+| --- | --- |
+| `coordinates/<species>_coordinates_v2.txt` | Transcript sequence, annotation and CDS mask |
+| `*_rnaseq_final_v2.pt` | RNA features, including log-transformed variants |
+| `*_riboseq_final_v2.pt` | Ribo targets, including log-transformed variants |
+| `*_eligible_v2.npy` | Transcript eligibility mask |
 
-The `uorfs/` directory includes the list of upstream open reading frames and protein-coding sequences used in the original study.
+Training converts feature tensors to NumPy files for memory-mapped loading.
 
----
+## 3. Train the tissue-conditioned model
 
-## License
+`PosTransModelTCNFiLMRef` predicts coverage from five nucleotide channels (A, T, C, G and N), one RNA-coverage channel, and learned tissue and condition embeddings. Dual FiLM layers apply context-dependent scaling and shifting to intermediate features. Parallel causal convolutions with kernels 3, 6 and 25 feed dilated residual blocks. The backbone dilation schedule extends to cover the input window; the TCN uses position-local normalization and dropout. Predictions are pooled into bins, and a smaller refinement TCN produces a gated additive correction.
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+### Train on one GPU
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
+  --tracks tracks.txt --tracks_dir tracks --save_path results_tissues \
+  --model-type PosTransModelTCNFiLMRef \
+  --region_len 4500 --nBins 1500 --biotype protein_coding \
+  --batch-size 2 --max-epochs 80 --dropout 0.33 \
+  --learning_rate 0.0002 --weight_decay 0.0037 \
+  --tissue_emb_dim 32 --cond_emb_dim 32 \
+  --warmup_steps 2000 --grad_accum 3 --grad_clip 0.5 --seed 4
+```
+
+The command sets training parameters explicitly. Use `python scripts/train_tissues.py --help` for all options and their Python defaults. Keep the same arguments when resuming or testing a run.
+
+### Train with SLURM
+
+```bash
+sbatch 3_train_model_tissue.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
+```
+
+Positional arguments are manifest, transcript length, output-bin count, model and seed. This launcher requests two nodes with eight A40 GPUs per node. Its settings include batch size 2 per GPU, dropout 0.334, learning rate 0.0002, weight decay 0.0037 and 32-dimensional tissue/condition embeddings. Edit resource requests and environment/network settings for your cluster. The launcher trains the model and then runs testing with the selected checkpoint.
+
+Training uses AdamW, a cosine learning-rate schedule, gradient accumulation, gradient clipping and bfloat16 mixed precision. Effective batch size is batch size per GPU multiplied by GPU count and gradient accumulation. Warmup is capped at `max(100, total_optimizer_steps // 10)`.
+
+The objective combines weighted MSE with a per-transcript Pearson-correlation penalty. `--zero_w` defaults to 0.1 and reduces the MSE weight of zero-coverage target bins; `--pcc_loss_w` defaults to 0.2. Padding is masked. Reported epoch PCC pools valid bins across transcripts and GPUs. Epoch loss accumulates its components globally instead of averaging batch losses.
+
+Validation runs every two epochs. Early stopping defaults to eight validation checks without improvement. `--monitor val/loss_epoch` selects the lowest validation loss; `--monitor val/pcc_epoch` selects the highest validation PCC. The default monitor is validation loss.
+
+### Chromosome split and testing
+
+By default, only manifest entries marked `training` contribute to fitting and validation. Chromosomes 16, 1 and X are reserved for testing when available; the code uses fallback chromosomes if needed. Validation chromosomes are selected using `--seed`, with species-specific fallbacks, and the remaining chromosomes form the training partition. Separate manifest entries marked `test` are evaluated only in test mode.
+
+To test, repeat the training command with identical model, data and run settings and add `--test`. It loads `best.ckpt` from that run's output directory. Alternatively, add `--test --checkpoint /path/to/best.ckpt` to select an explicit checkpoint. The trainer constructs the model from command-line arguments, so architecture, embeddings and sequence-control flags must match the checkpoint.
+
+### Homology-separated training and validation
+
+Use `--homology /path/to/clusters.tsv` to split eligible homology clusters into 70% training and 30% validation, using `--seed`. The tab-separated input must contain a header and one transcript per row:
+
+```text
+cluster_id	transcript_id
+cluster_000001	ENST00000511072
+cluster_000001	ENSMUST00000087557
+```
+
+All members of a cluster stay in the same partition across species, tissues and conditions. Transcript IDs must exactly match the coordinate tables. Unmapped transcripts are excluded. Existing biotype, RNA-eligibility and usable-sequence filters still apply. The ratio is by eligible cluster count, rounded to whole clusters, not transcript count. At least two eligible clusters are required.
+
+This mode creates no test partition, ignores test-tagged tracks, and cannot be combined with `--test` or the chromosome-debugging option `--trial`. Cluster assignments are saved in `homology_split.json`.
+
+```bash
+sbatch 3_train_model_tissue_homologs.sh \
+  tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4 /path/to/clusters.tsv
+```
+
+The homology launcher runs training and validation only. The mapping is supplied as its sixth argument. Provide your own mapping file; homology inputs are excluded from Git.
+
+### Sequence controls
+
+Add `--nosequence` to train with RNA coverage and tissue/condition context, without nucleotide features.
+
+Add `--shuflledutr` (alias `--shuffledutr`) to shuffle sequence before the annotated CDS. This preserves nucleotide composition, keeps Ns in place, and leaves CDS, 3-prime UTR, RNA coverage and targets unchanged. Only bases within the input window are shuffled. The ninth coordinate-table column defines the CDS in spliced-transcript orientation on both strands. Transcripts without marked CDS bases remain unchanged.
+
+Each species/transcript receives a fixed shuffle across workers, epochs and samples. `--shuffle-seed` selects a separate seed; otherwise `--seed` is used. The two controls cannot be combined. Use identical splits and hyperparameters for comparisons. Shuffling tests UTR sequence order while retaining composition; it does not remove the UTR.
+
+SLURM control launchers accept the same five positional arguments as the main launcher:
+
+```bash
+sbatch 3_train_model_tissue_noseq.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
+sbatch 3_train_model_tissue_shuffledutr.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
+```
+
+### Training outputs and resumption
+
+Each run writes a configuration-specific directory under `results_tissues/` containing:
+
+- `best.ckpt`, selected by the validation monitor, validation-ranked epoch checkpoints, and `last.ckpt`, the latest saved training state.
+- `tissue_vocab.json` and `cond_vocab.json`, written when training finishes; vocabularies are also stored in checkpoints.
+- CSV logs and `training_history.csv`, with training and validation loss/PCC by epoch.
+- `training_validation_loss.pdf` and `training_validation_pcc.pdf`, vector plots written when training finishes, including early stopping.
+- `homology_split.json` when using homology splitting.
+
+Plots label epochs starting at 1; the history CSV stores zero-based epoch indices. Training points appear every epoch and validation points only on evaluated epochs. The plotted loss is the combined objective, not MSE alone. Sequence controls and homology mappings receive distinct output-directory suffixes.
+
+To resume training, repeat its command and add `--checkpoint /path/to/last.ckpt`. Preserve the original inputs, arguments and data split. Retain logs from earlier training segments separately: the final history/plots describe epochs recorded in the current process.
+
+Keep checkpoints, sample manifests, homology mappings and feature metadata for reproducibility. Generated data, results and local analysis folders are excluded from Git.
+
+## 4. Predict Ribo-seq coverage
+
+Use a trained checkpoint to predict normalized Ribo-seq coverage for a species, tissue and condition. Sequence and RNA-seq are the model inputs; measured Ribo-seq is optional and is used only for comparison. Predictions cover the first 4,500 nt in transcript orientation, with 1,500 bins of 3 nt each.
+
+### Required inputs
+
+- A tissue-conditioned checkpoint, preferably `best.ckpt` from the selected training run.
+- `coordinates/<species>_coordinates_v2.txt`, containing transcript sequences and annotation.
+- `coordinates/<species>.bed`, containing the exon mapping generated during feature extraction.
+- RNA features at `tracks/<species>/<tissue>_<condition>/<species>_<tissue>_<condition>_rna_4500_log_rnaseq_final_v2.npy`.
+
+RNA feature rows must match the complete coordinate table in the same order, including transcripts that are later filtered by biotype. Use the same normalization and feature extraction as for training. Tissue and condition labels should match the checkpoint vocabularies for predictions in a trained context.
+
+For a new RNA-only sample, prepare the references as in step 1 and supply an RNA-seq row to step 2's coverage preparation, for example:
+
+```text
+/path/to/mouse_heart_rna.bam mouse heart adult test
+```
+
+Run coverage preparation and feature extraction as described above. The preparation tools can process RNA without a paired Ribo-seq track for prediction. Feature extraction writes `.pt` tensors; training converts them to `.npy`, but a new prediction-only sample needs that conversion explicitly. For the example sample:
+
+```bash
+python - <<'PY'
+from pathlib import Path
+import numpy as np
+import torch
+
+path = Path("tracks/mouse/heart_adult/mouse_heart_adult_rna_4500_log_rnaseq_final_v2.pt")
+output = path.with_suffix(".npy")
+if not output.exists():
+    values = torch.load(path, map_location="cpu", weights_only=True)
+    np.save(output, values.numpy())
+PY
+```
+
+Use species, tissue and condition names appropriate to your sample throughout. If measured Ribo-seq is available, its matching log-feature `.npy` file enables comparison statistics and an observed coverage track. If it is absent, prediction continues with a warning and observed-Ribo comparison statistics are unavailable.
+
+### Run prediction with SLURM
+
+Run from the repository root after preparing the inputs:
+
+```bash
+mkdir -p logs
+sbatch 4_predict_tissue.sh \
+  /path/to/best.ckpt PosTransModelTCNFiLMRef mouse heart adult 1500
+```
+
+The six arguments are checkpoint, model, species, tissue, condition and number of output bins. This launcher requests one A40 GPU and predicts protein-coding transcripts with attribution calculation disabled. Review its SLURM resources and environment activation before submission. Input length is 4,500 nt; use features and binning matching the trained checkpoint.
+
+For direct execution:
+
+```bash
+python scripts/predict_tissues.py \
+  --checkpoint /path/to/best.ckpt \
+  --model_type PosTransModelTCNFiLMRef \
+  --species mouse --tissue heart --condition adult \
+  --tracks_dir tracks --coordinates coordinates \
+  --region_len 4500 --nBins 1500 --biotype protein_coding \
+  --output_dir predictions_tissues/mouse_heart_adult \
+  --no_attribution
+```
+
+The prediction script reads model type, tissue/condition vocabularies and embedding dimensions from checkpoint metadata. Sequence length and output bin count must still be supplied consistently. Dropout is disabled during prediction. A checkpoint trained with `--nosequence` uses RNA and tissue/condition context without nucleotide features.
+
+### Prediction outputs
+
+The SLURM launcher writes to `predictions_tissues/<species>_<tissue>_<condition>_<model>_protein_coding_<bins>/`:
+
+| File | Content |
+| --- | --- |
+| `predictions.bedgraph` | Predicted normalized Ribo-seq coverage projected onto genomic exon coordinates |
+| `rnaseq.bedgraph` | Input RNA-seq coverage projected onto genomic coordinates |
+| `riboseq.bedgraph` | Observed Ribo-seq coverage, when its features are available |
+| `transcript_stats.tsv` | Transcript-level summaries and correlations with observed Ribo-seq when available |
+
+Coverage values are inverse-transformed to the normalized non-log scale by default; they are not raw read counts. The direct Python option `--output_raw_log` writes predictions on the model's log scale instead.
+
+The `.bedgraph` files are extended seven-column tables: chromosome, start, end, value, strand, transcript ID and bin index. Coordinates are zero-based, half-open. Multiple isoforms can contribute overlapping intervals, so these files require an explicit isoform-selection or aggregation step before conversion to a conventional genome-browser BigWig.
+
+The script skips transcripts already recorded in `transcript_stats.tsv` when rerunning into the same output directory. Use a new output directory for a different checkpoint or changed inputs. Prediction outputs and input data remain excluded from Git; the launcher and required Python modules are included.

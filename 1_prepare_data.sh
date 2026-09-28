@@ -1,17 +1,29 @@
 #!/bin/bash
+#SBATCH --job-name=prepare_tracks
+#SBATCH --output=logs/prepare_tracks_%j.out
+#SBATCH --time=96:00:00
+#SBATCH --mem=300G
+#SBATCH --cpus-per-task=8
+#SBATCH --ntasks=1
+
 # Author: Jorge Ruiz-Orera
 # This script prepares RNA-seq and Ribo-seq tracks from BAM files specified in tracks.txt
 
 set -e  # Exit on error
 set -o pipefail  # Catch pipe errors
 
-conda activate translatomer
+source ~/.bashrc
+mamba activate ribotranspred
 
 # Configuration
 TRACKS_FILE=$1
 OUTPUT_ROOT="tracks"
 CPU="8"
 NORM="RPKM"
+
+# Save tmp files
+export TMPDIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/ribotranspred_${SLURM_JOB_ID:-$$}"
+mkdir -p "$TMPDIR"
 
 # Create output directories
 mkdir -p "${OUTPUT_ROOT}"
@@ -89,7 +101,8 @@ process_entry() {
     local bam_file=$1
     local species=$2
     local tissue=$3
-    local dataset=$4
+    local condition=$4
+    local dataset=$5
     
     if [[ ! -f "$bam_file" ]]; then
         echo "Error: BAM file not found: $bam_file" >&2
@@ -105,28 +118,29 @@ process_entry() {
         return 1
     fi
     
-    # Create output directory structure: tracks/species/tissue/
-    local output_dir="${OUTPUT_ROOT}/${species}/${tissue}"
+    # Create output directory structure: tracks/species/tissue_condition/
+    local tissue_condition="${tissue}_${condition}"
+    local output_dir="${OUTPUT_ROOT}/${species}/${tissue_condition}"
     mkdir -p "$output_dir"
     
-    # Create output prefix: species_tissue_rna/ribo
-    local output_prefix="${output_dir}/${species}_${tissue}_${seq_type}"
+    # Create output prefix: species_tissue_condition_rna/ribo
+    local output_prefix="${output_dir}/${species}_${tissue_condition}_${seq_type}"
     
     echo "Processing: $(basename $bam_file)"
-    echo "  Species: $species, Tissue: $tissue, Type: $seq_type"
+    echo "  Species: $species, Tissue: $tissue, Condition: $condition, Type: $seq_type"
     echo "  Output directory: $output_dir"
     
     # Generate coverage files
     if [[ "$seq_type" == "rna" ]]; then
         generate_coverage "$bam_file" "$output_prefix" "rna"
-        echo "  Created: ${species}_${tissue}_${seq_type}.bw"
+        echo "  Created: ${species}_${tissue_condition}_${seq_type}.bw"
     elif [[ "$seq_type" == "ribo" ]]; then
         generate_coverage "$bam_file" "$output_prefix" "ribo" 28 30
-        echo "  Created: ${species}_${tissue}_${seq_type}.bw"
-        echo "  Created: ${species}_${tissue}_${seq_type}.psites.bw"
+        echo "  Created: ${species}_${tissue_condition}_${seq_type}.bw"
+        echo "  Created: ${species}_${tissue_condition}_${seq_type}.psites.bw"
     fi
     
-    echo "  ✓ Completed"
+    echo "  âœ“ Completed"
     return 0
 }
 
@@ -141,11 +155,11 @@ echo "========================================"
 if [[ ! -f "$TRACKS_FILE" ]]; then
     echo "Error: $TRACKS_FILE not found!" >&2
     echo "Please create a tracks.txt file with format:" >&2
-    echo "  <bam_file> <species> <tissue> <dataset>" >&2
+    echo "  <bam_file> <species> <tissue> <condition> <dataset>" >&2
     echo ""
     echo "Example:"
-    echo "  /path/to/human_heart_rna.bam human heart training"
-    echo "  /path/to/human_heart_ribo.bam human heart training"
+    echo "  /path/to/human_heart_ctrl_rna.bam human heart ctrl training"
+    echo "  /path/to/human_heart_ctrl_ribo.bam human heart ctrl training"
     exit 1
 fi
 
@@ -166,10 +180,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     total_count=$((total_count + 1))
     
     # Split line into columns
-    IFS=$' \t' read -r bam_file species tissue dataset <<< "$line"
+    IFS=$' \t' read -r bam_file species tissue condition dataset <<< "$line"
     
     # Validate required fields
-    if [[ -z "$bam_file" || -z "$species" || -z "$tissue" ]]; then
+    if [[ -z "$bam_file" || -z "$species" || -z "$tissue" || -z "$condition" ]]; then
         echo "Warning: Missing required fields in line: $line" >&2
         error_count=$((error_count + 1))
         continue
@@ -178,7 +192,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     echo "----------------------------------------"
     echo "Entry $total_count:"
     
-    if process_entry "$bam_file" "$species" "$tissue" "$dataset"; then
+    if process_entry "$bam_file" "$species" "$tissue" "$condition" "$dataset"; then
         success_count=$((success_count + 1))
     else
         error_count=$((error_count + 1))
@@ -186,17 +200,19 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     
 done < "$TRACKS_FILE"
 
+echo "========================================"
 echo "PROCESSING SUMMARY"
+echo "========================================"
 echo "Total entries: $total_count"
 echo "Successfully processed: $success_count"
 echo "Errors: $error_count"
 echo ""
 echo "Output structure in ${OUTPUT_ROOT}/:"
 echo "  species/"
-echo "  └── tissue/"
-echo "      ├── species_tissue_rna.bw"
-echo "      ├── species_tissue_ribo.bw"
-echo "      └── species_tissue_ribo.psites.bw"
+echo "  â””â”€â”€ tissue_condition/"
+echo "      â”œâ”€â”€ species_tissue_condition_rna.bw"
+echo "      â”œâ”€â”€ species_tissue_condition_ribo.bw"
+echo "      â””â”€â”€ species_tissue_condition_ribo.psites.bw"
 echo ""
 
 # Show generated files
@@ -214,4 +230,7 @@ if [[ $success_count -eq 0 ]]; then
 fi
 
 echo ""
+echo "========================================"
+echo "Processing complete! âœ¨"
 echo "All tracks saved in: ${OUTPUT_ROOT}/"
+echo "========================================"
