@@ -116,10 +116,12 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
   --tracks tracks.txt --tracks_dir tracks --save_path results_tissues \
   --model-type PosTransModelTCNFiLMRef \
   --region_len 4500 --nBins 1500 --biotype protein_coding \
-  --batch-size 2 --max-epochs 80 --dropout 0.33 \
-  --learning_rate 0.0002 --weight_decay 0.0037 \
-  --tissue_emb_dim 32 --cond_emb_dim 32 \
-  --warmup_steps 2000 --grad_accum 3 --grad_clip 0.5 --seed 4
+  --batch-size 4 --max-epochs 80 --dropout 0.31331501114417054 \
+  --learning_rate 0.00011798813467572021 --weight_decay 0.00015675889503087513 \
+  --tissue_emb_dim 16 --cond_emb_dim 32 \
+  --warmup_steps 2000 --grad_accum 6 --grad_clip 0.10415084795788762 \
+  --zero_w 0.25755589717378796 --pcc_loss_w 0.10641362001058341 \
+  --num-workers 1 --seed 4
 ```
 
 The command sets training parameters explicitly. Use `python scripts/train_tissues.py --help` for all options and their Python defaults. Keep the same arguments when resuming or testing a run.
@@ -130,11 +132,11 @@ The command sets training parameters explicitly. Use `python scripts/train_tissu
 sbatch 3_train_model_tissue.sh tracks.txt 4500 1500 PosTransModelTCNFiLMRef 4
 ```
 
-Positional arguments are manifest, transcript length, output-bin count, model and seed. This launcher requests two nodes with eight A40 GPUs per node. Its settings include batch size 2 per GPU, dropout 0.334, learning rate 0.0002, weight decay 0.0037 and 32-dimensional tissue/condition embeddings. Edit resource requests and environment/network settings for your cluster. The launcher trains the model and then runs testing with the selected checkpoint.
+Positional arguments are manifest, transcript length, output-bin count, model and seed. This launcher requests two nodes with eight A40 GPUs per node. Its training hyperparameters match the explicit one-GPU command above: batch size 4 per GPU, gradient accumulation 6, and tissue/condition embedding dimensions 16/32. Edit resource requests and environment/network settings for your cluster. The launcher trains the model and then runs testing with the selected checkpoint.
 
 Training uses AdamW, a cosine learning-rate schedule, gradient accumulation, gradient clipping and bfloat16 mixed precision. Effective batch size is batch size per GPU multiplied by GPU count and gradient accumulation. Warmup is capped at `max(100, total_optimizer_steps // 10)`.
 
-The objective combines weighted MSE with a per-transcript Pearson-correlation penalty. `--zero_w` defaults to 0.1 and reduces the MSE weight of zero-coverage target bins; `--pcc_loss_w` defaults to 0.2. Padding is masked. Reported epoch PCC pools valid bins across transcripts and GPUs. Epoch loss accumulates its components globally instead of averaging batch losses.
+The objective combines weighted MSE with a per-transcript Pearson-correlation penalty. `--zero_w` defaults to 0.25755589717378796 and reduces the MSE weight of zero-coverage target bins; `--pcc_loss_w` defaults to 0.10641362001058341. Padding is masked. Reported epoch PCC pools valid bins across transcripts and GPUs. Epoch loss accumulates its components globally instead of averaging batch losses.
 
 Validation runs every two epochs. Early stopping defaults to eight validation checks without improvement. `--monitor val/loss_epoch` selects the lowest validation loss; `--monitor val/pcc_epoch` selects the highest validation PCC. The default monitor is validation loss.
 

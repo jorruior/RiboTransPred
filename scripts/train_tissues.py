@@ -990,19 +990,19 @@ def parse_args():
     p.add_argument("--max-epochs",      type=int,   default=80)
     p.add_argument("--save-top-n",      type=int,   default=5)
     p.add_argument("--batch-size",      type=int,   default=4)
-    p.add_argument("--num-workers",     type=int,   default=4)
-    p.add_argument("--dropout",         type=float, default=None)
-    p.add_argument("--learning_rate",   type=float, default=1e-5)
-    p.add_argument("--weight_decay",    type=float, default=5e-4)
+    p.add_argument("--num-workers",     type=int,   default=1)
+    p.add_argument("--dropout",         type=float, default=0.31331501114417054)
+    p.add_argument("--learning_rate",   type=float, default=0.00011798813467572021)
+    p.add_argument("--weight_decay",    type=float, default=0.00015675889503087513)
     p.add_argument("--warmup_steps",    type=int,   default=2000)
-    p.add_argument("--grad_accum",      type=int,   default=3)
-    p.add_argument("--grad_clip",       type=float, default=0.5)
-    p.add_argument("--tissue_emb_dim",  type=int,   default=64,
+    p.add_argument("--grad_accum",      type=int,   default=6)
+    p.add_argument("--grad_clip",       type=float, default=0.10415084795788762)
+    p.add_argument("--tissue_emb_dim",  type=int,   default=16,
                    help="Dimension of tissue embedding for FiLM")
     p.add_argument("--cond_emb_dim",    type=int,   default=32,
                    help="Dimension of condition embedding for FiLM")
-    p.add_argument("--zero_w",          type=float, default=0.1)
-    p.add_argument("--pcc_loss_w",      type=float, default=0.2)
+    p.add_argument("--zero_w",          type=float, default=0.25755589717378796)
+    p.add_argument("--pcc_loss_w",      type=float, default=0.10641362001058341)
     p.add_argument("--monitor", default="val/loss_epoch",
                    choices=["val/loss_epoch", "val/pcc_epoch"])
     p.add_argument("--checkpoint",      type=str,   default=None)
@@ -1012,8 +1012,6 @@ def parse_args():
         p.error("--homology cannot be combined with --test or --trial")
     if args.nosequence and args.shuflledutr:
         p.error("--nosequence and --shuflledutr cannot be combined")
-    if args.dropout is None:
-        args.dropout = 0.33 if "TCN" in args.model_type else 0.3
     return args
 
 

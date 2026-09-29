@@ -62,16 +62,18 @@ BIOTYPE="protein_coding"
 MODEL=$4
 SEED=$5
 
-BATCH_SIZE=2
+BATCH_SIZE=4
 MAX_EPOCHS=80
-DROPOUT=0.334
-LR=2e-4
-WEIGHT_DECAY=0.0037
+DROPOUT=0.31331501114417054
+LR=0.00011798813467572021
+WEIGHT_DECAY=0.00015675889503087513
 WARMUP=2000
-GRAD_ACCUM=3
-GRAD_CLIP=0.5
-TISSUE_EMB_DIM=32
+GRAD_ACCUM=6
+GRAD_CLIP=0.10415084795788762
+TISSUE_EMB_DIM=16
 COND_EMB_DIM=32
+ZERO_W=0.25755589717378796
+PCC_LOSS_W=0.10641362001058341
 
 # ============ CONDITIONAL FLAGS ============
 EXTRA_ARGS=""
@@ -110,6 +112,8 @@ echo "GRAD_ACCUM=$GRAD_ACCUM"
 echo "GRAD_CLIP=$GRAD_CLIP"
 echo "TISSUE_EMB_DIM=$TISSUE_EMB_DIM"
 echo "COND_EMB_DIM=$COND_EMB_DIM"
+echo "ZERO_W=$ZERO_W"
+echo "PCC_LOSS_W=$PCC_LOSS_W"
 echo "Effective batch size: $((BATCH_SIZE * GRAD_ACCUM * SLURM_NTASKS))"
 echo "Extra args: $EXTRA_ARGS"
 echo "========================================="
@@ -138,6 +142,8 @@ PYTHON_ARGS="
     --grad_clip      $GRAD_CLIP
     --tissue_emb_dim $TISSUE_EMB_DIM
     --cond_emb_dim   $COND_EMB_DIM
+    --zero_w         $ZERO_W
+    --pcc_loss_w     $PCC_LOSS_W
     --num-workers    1
     --seed           $SEED
     $EXTRA_ARGS
