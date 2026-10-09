@@ -167,7 +167,7 @@ CUDA_VISIBLE_DEVICES=0 python scripts/train_tissues.py \
   --homology /path/to/clusters.tsv
 ```
 
-This command runs training and validation only. Provide your own mapping file; homology inputs are excluded from Git. Add the desired training hyperparameters as in the one-GPU example above.
+This command runs training and validation only. Provide your own mapping file. Add the desired training hyperparameters as in the one-GPU example above.
 
 ### RNA-only control
 
@@ -189,11 +189,7 @@ Each run writes a configuration-specific directory under `results_tissues/` cont
 - `training_validation_loss.pdf` and `training_validation_pcc.pdf`, vector plots written when training finishes, including early stopping.
 - `homology_split.json` when using homology splitting.
 
-Plots label epochs starting at 1; the history CSV stores zero-based epoch indices. Training points appear every epoch and validation points only on evaluated epochs. The plotted loss is the combined objective, not MSE alone. Sequence controls and homology mappings receive distinct output-directory suffixes.
-
 To resume training, repeat its command and add `--checkpoint /path/to/last.ckpt`. Preserve the original inputs, arguments and data split. Retain logs from earlier training segments separately: the final history/plots describe epochs recorded in the current process.
-
-Keep checkpoints, sample manifests, homology mappings and feature metadata for reproducibility. Generated data, results and local analysis folders are excluded from Git.
 
 ## 4. Predict Ribo-seq coverage
 
@@ -274,4 +270,4 @@ Coverage values are inverse-transformed to the normalized non-log scale by defau
 
 The `.bedgraph` files are extended seven-column tables: chromosome, start, end, value, strand, transcript ID and bin index. Coordinates are zero-based, half-open. Multiple isoforms can contribute overlapping intervals, so these files require an explicit isoform-selection or aggregation step before conversion to a conventional genome-browser BigWig.
 
-The script skips transcripts already recorded in `transcript_stats.tsv` when rerunning into the same output directory. Use a new output directory for a different checkpoint or changed inputs. Prediction outputs and input data remain excluded from Git; the launcher and required Python modules are included.
+The script skips transcripts already recorded in `transcript_stats.tsv` when rerunning into the same output directory. Use a new output directory for a different checkpoint or changed inputs.
