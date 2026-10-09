@@ -45,7 +45,7 @@ gffread coordinates/mouse.gtf -g genomes/mouse.fa \
   -w genomes/mouse.transcripts.fa
 ```
 
-Alternatively, provide the matching transcript FASTA from the annotation provider. Transcript FASTA identifiers must match GTF transcript identifiers. Repeat for each species. Reference files are local inputs and are excluded from Git.
+Alternatively, provide the matching transcript FASTA from the annotation provider. Transcript FASTA identifiers must match GTF transcript identifiers. Repeat for each species.
 
 ## 2. Prepare coverage and transcript features
 
