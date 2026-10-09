@@ -84,7 +84,7 @@ Wait for this job to finish successfully before extracting features.
 sbatch 2_extract_features.sh
 ```
 
-The default configuration is 4,500 nt, 1,500 output bins and a raw RNA coverage cutoff of 5. To run extraction directly:
+The default configuration is 4,500 nt, 1,500 output bins and a raw RNA coverage cutoff of 5 (at least 10% of positions in the unpadded RNA-seq profile had coverage ≥5 before log transformation). To run extraction directly:
 
 ```bash
 python scripts/extract_cov_features.py 4500 1500 5
